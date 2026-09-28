@@ -1108,7 +1108,7 @@
       name.style.color = safeColor(s.color);
       side.appendChild(name);
       side.appendChild(node('span', 'ms-creep-score-stat',
-        `${s.count} camps · Lv ${s.totalLvl}${s.totalXp ? ` · ${s.totalXp} XP` : ''}`));
+        `${s.count} camps · Camp Lv ${s.totalLvl}${s.totalXp ? ` · ${s.totalXp} XP` : ''}`));
       scoreRow.appendChild(side);
     }
     body.appendChild(scoreRow);
