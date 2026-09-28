@@ -2318,8 +2318,12 @@
         if (!player || !player.units) continue;
         for (const unit of player.units) {
           if (!unit.isBuilding) continue;
-          const wx = unit.currentX || (unit.spawnPosition && unit.spawnPosition.x) || 0;
-          const wy = unit.currentY || (unit.spawnPosition && unit.spawnPosition.y) || 0;
+          // Most buildings only carry lastPosition (mobile units already fall
+          // back to it — see UnitModelRenderer.js); without it here, any
+          // building whose spawnPosition wasn't recorded silently lands at
+          // (0,0) and gets dropped by the check below.
+          const wx = unit.currentX || (unit.spawnPosition && unit.spawnPosition.x) || (unit.lastPosition && unit.lastPosition.x) || 0;
+          const wy = unit.currentY || (unit.spawnPosition && unit.spawnPosition.y) || (unit.lastPosition && unit.lastPosition.y) || 0;
           if (wx === 0 && wy === 0) continue;
 
           const readyTime = unit.readyTime || unit.constructionStartTime || unit.spawnTime || 0;

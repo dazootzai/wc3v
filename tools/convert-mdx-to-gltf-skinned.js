@@ -209,7 +209,12 @@ function resolveGeosetMaterial (mdx, geoset) {
       continue;
     }
     if (tex.ReplaceableId !== 0 || !tex.Image) continue; // other replaceable / empty
-    const baseName = path.basename(tex.Image, path.extname(tex.Image)).toLowerCase();
+    // tex.Image is a Windows-style backslash path — path.basename only treats
+    // '/' as a separator on POSIX, so without normalizing first this silently
+    // returns the whole path (lowercased) instead of just the filename, and
+    // every texture lookup below misses. (Same bug fixed for buildings in
+    // convert-mdx-to-gltf.js.)
+    const baseName = path.basename(tex.Image.replace(/\\/g, '/'), path.extname(tex.Image)).toLowerCase();
     const cand = {
       baseName,
       replaceableId: 0,
@@ -632,13 +637,20 @@ function getUnitMappings () {
     const fp = fileVal.replace(/\\/g, '/');
     if (!/^units\//i.test(fp)) continue; // skip buildings/other
     const rel = fp.replace(/^units\//i, '');
-    out[id] = { model: path.basename(rel).toLowerCase(), mdxPath: path.join(UNITS_DIR, rel + '.mdx') };
+    // Our own CASC extraction writes every path in lowercase (see
+    // bulk_extract.js), but unitskin.txt's `file=` keeps original CASC case
+    // (fine on Windows' case-insensitive filesystem, not on Linux) — match it.
+    out[id] = { model: path.basename(rel).toLowerCase(), mdxPath: path.join(UNITS_DIR, rel.toLowerCase() + '.mdx') };
   }
   return out;
 }
 
 async function exportOne (file, scale, ddsIndex, outPath) {
-  const ab = stripMDXChunks(new Uint8Array(fs.readFileSync(file)).buffer, ['LITE']);
+  // Strip LITE (extended Reforged light fields) and CAMS (cinematic cameras)
+  // — war3-model's parser chokes on both in some MDX files, and neither is
+  // needed for a skinned/animated in-game unit. Deliberately NOT stripping
+  // BPOS (bind pose) — the skeleton needs it.
+  const ab = stripMDXChunks(new Uint8Array(fs.readFileSync(file)).buffer, ['LITE', 'CAMS']);
   const mdx = parseMDX(ab);
   const { doc, info } = buildSkinnedDocument(mdx, ddsIndex, { scale });
   if (!info.exportedGeosets) throw new Error('no exportable geosets');

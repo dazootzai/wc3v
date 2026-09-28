@@ -831,6 +831,15 @@ const Wc3vViewer = class {
       this.buildingStatusFx.setEnabled(this.viewOptions.displayBuildingStatus !== false);
     }
 
+    // Under-attack markers over mobile units — same signal, same reasoning,
+    // see UnitStatusFx's header. Reuses the same view-option flag as the
+    // building markers rather than adding a second toggle.
+    if (window.UnitStatusFx) {
+      this.unitStatusFx = new UnitStatusFx(this.threeMapRenderer, this);
+      this.unitStatusFx.setup(this.players);
+      this.unitStatusFx.setEnabled(this.viewOptions.displayBuildingStatus !== false);
+    }
+
     // Building ground splats
     if (window.BuildingSplats) {
       this.buildingSplats = new BuildingSplats(this.threeMapRenderer);
@@ -1507,6 +1516,9 @@ const Wc3vViewer = class {
     // would never run for objects the scene graph renders on its own.
     if (optionKey === 'displayBuildingStatus' && this.buildingStatusFx) {
       this.buildingStatusFx.setEnabled(isOn);
+    }
+    if (optionKey === 'displayBuildingStatus' && this.unitStatusFx) {
+      this.unitStatusFx.setEnabled(isOn);
     }
 
     // The graphs HUD owns its own canvas element, so hiding it is a class-level
@@ -5013,6 +5025,10 @@ const Wc3vViewer = class {
       if (this.unitModelRenderer) {
         this.unitModelRenderer.update(gameTime, this.players, this.viewOptions);
       }
+      // After unitModelRenderer: that call is what primes each unit's
+      // getInterpolatedPosition() cursor (ClientUnit.getCurrentMovePath) for
+      // this gameTime. Running before it, every lookup here returns null.
+      if (this.unitStatusFx) this.unitStatusFx.update(gameTime);
       if (this.projectileRenderer) {
         this.projectileRenderer.update(gameTime, this.players, this.viewOptions);
       }
@@ -5354,6 +5370,7 @@ const Wc3vViewer = class {
       this.threeMapRenderer.updatePlayerBuildings(gameTime);
       if (this.buildingProgressBar) this.buildingProgressBar.update(gameTime);
       if (this.buildingStatusFx) this.buildingStatusFx.update(gameTime);
+      if (this.unitStatusFx) this.unitStatusFx.update(gameTime);
       if (this.buildingSplats) this.buildingSplats.updateVisibility(gameTime);
       if (this.pathTrailRenderer) {
         this.pathTrailRenderer.update(gameTime, this.players, this.viewOptions);

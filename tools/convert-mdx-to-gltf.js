@@ -516,8 +516,11 @@ function getStandVisibleGeosets (mdx, formTag = null) {
 function mdxToMeshData (mdxPath, mode) {
   const buf = fs.readFileSync(mdxPath);
   let ab = new Uint8Array(buf).buffer;
-  // Strip LITE chunk — Reforged MDX has extended light fields war3-model can't parse
-  ab = stripMDXChunks(ab, ['LITE']);
+  // Strip chunks war3-model's parser can't handle in various Reforged MDX
+  // files — none are needed for a static bind-pose mesh: LITE (extended
+  // light fields), CAMS (cinematic cameras), CLID (collision shapes),
+  // BPOS (bind pose — only needed for skinned export, done separately).
+  ab = stripMDXChunks(ab, ['LITE', 'CAMS', 'CLID', 'BPOS']);
   const mdx = parseMDX(ab);
 
   if (!mdx.Geosets || mdx.Geosets.length === 0) {
@@ -810,7 +813,10 @@ function resolveLayerTextureId (layer) {
 function mdxToBuildingGeosets (mdxPath, formTag = null) {
   const buf = fs.readFileSync(mdxPath);
   let ab = new Uint8Array(buf).buffer;
-  ab = stripMDXChunks(ab, ['LITE']);
+  // Strip LITE (extended Reforged light fields) and CAMS (construction/menu
+  // cinematic cameras) — war3-model's parser chokes on both in many building
+  // MDX files, and neither is needed for a static in-game mesh.
+  ab = stripMDXChunks(ab, ['LITE', 'CAMS']);
   const mdx = parseMDX(ab);
   if (!mdx.Geosets || !mdx.Geosets.length) return null;
 
@@ -844,7 +850,11 @@ function mdxToBuildingGeosets (mdxPath, formTag = null) {
   const texMap = {}; // blpBaseName → textureIndex
   function getTextureIndex (blpPath, filterMode) {
     if (!blpPath) return -1;
-    const base = path.basename(blpPath, path.extname(blpPath)).toLowerCase();
+    // blpPath is a Windows-style backslash path — path.basename only treats
+    // '/' as a separator on POSIX, so without normalizing first this returns
+    // the whole path (lowercased) instead of just the filename, and every
+    // DDS index lookup below misses.
+    const base = path.basename(blpPath.replace(/\\/g, '/'), path.extname(blpPath)).toLowerCase();
     if (texMap[base] !== undefined) return texMap[base];
     const idx = textureRefs.length;
     texMap[base] = idx;

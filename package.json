@@ -79,5 +79,12 @@
 		"protobufjs": "^7.6.5"
 	},
 	"license": "GNU v3.0",
-	"readmeFilename": "README.md"
+	"readmeFilename": "README.md",
+	"allowScripts": {
+		"canvas@3.2.1": true,
+		"esbuild@0.25.0": true,
+		"esbuild@0.28.1": true,
+		"protobufjs@7.6.5": true,
+		"workerd@1.20260804.1": true
+	}
 }

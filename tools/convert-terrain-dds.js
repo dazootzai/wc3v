@@ -423,4 +423,6 @@ function main () {
   console.log(`Cliff textures: ${cliffSuccess} converted, ${cliffMissing} missing, ${cliffFailed} failed`);
 }
 
-main();
+module.exports = { decodeDds };
+
+if (require.main === module) main();
