@@ -25,6 +25,13 @@ const WC3V_DIR = path.join(__dirname, '..');
 const DEPLOY_DIR = path.join(WC3V_DIR, '..', 'wc3v-deploy');
 const TOKEN_ENV = path.join(process.env.HOME, '.config', 'wc3-replays', 'deploy.env');
 
+// Runs under systemd as a user service, whose default PATH is minimal
+// (/usr/bin and friends) and doesn't include ~/.local/bin -- found the hard
+// way when the "node" spawned below (and npx, for wrangler) came back
+// ENOENT despite working fine from an interactive shell. Fix once here
+// rather than hardcode an absolute path at every execFileSync call site.
+process.env.PATH = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
+
 // Raw map folder name -> display name. Add an entry here the first time a
 // new map is manually extracted (see README.md), or this script will skip
 // that map with "unknown map" rather than guess a name.
