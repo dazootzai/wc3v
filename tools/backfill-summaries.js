@@ -8,7 +8,7 @@
 */
 const fs = require('fs');
 const path = require('path');
-const { generateSummary } = require('./generate-summary');
+const { generateSummary, extractFacts } = require('./generate-summary');
 
 const DEPLOY_DIR = path.join(__dirname, '..', '..', 'wc3v-deploy');
 const HTML_PATH = path.join(DEPLOY_DIR, 'my-replays.html');
@@ -28,6 +28,7 @@ async function main () {
 
     console.log(`generating: ${file}...`);
     const data = JSON.parse(fs.readFileSync(path.join(DEPLOY_DIR, 'replays', f), 'utf8'));
+    const facts = extractFacts(data);
     let text;
     try {
       text = await generateSummary(data);
@@ -36,9 +37,14 @@ async function main () {
       continue;
     }
     const escaped = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const stripped = m[0].replace(/,\s*summary:\s*'(?:[^'\\]|\\.)*'/, '');
-    const withSummary = stripped.replace(/\}$/, `, summary: '${escaped}' }`);
-    updated = updated.replace(m[0], withSummary);
+    let entry = m[0]
+      .replace(/,\s*summary:\s*'(?:[^'\\]|\\.)*'/, '')
+      .replace(/,\s*dazRace:\s*'(?:[^'\\]|\\.)*'/, '')
+      .replace(/,\s*oppRace:\s*'(?:[^'\\]|\\.)*'/, '')
+      .replace(/,\s*winner:\s*'(?:[^'\\]|\\.)*'/, '');
+    const raceFields = facts ? `, dazRace: '${facts.dazootzRace}', oppRace: '${facts.opponentRace}', winner: '${facts.winner || ''}'` : '';
+    entry = entry.replace(/\}$/, `${raceFields}, summary: '${escaped}' }`);
+    updated = updated.replace(m[0], entry);
     console.log(`  done (${text.length} chars)`);
   }
 

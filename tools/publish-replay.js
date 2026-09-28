@@ -33,7 +33,7 @@ const TOKEN_ENV = path.join(process.env.HOME, '.config', 'wc3-replays', 'deploy.
 process.env.PATH = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
 
 const MAP_DISPLAY_NAMES = require('./map-display-names');
-const { generateSummary } = require('./generate-summary');
+const { generateSummary, extractFacts } = require('./generate-summary');
 
 function notify (title, body) {
   try { execFileSync('notify-send', [title, body]); } catch (e) { /* best-effort */ }
@@ -143,9 +143,11 @@ try { fs.renameSync(input, path.join(path.dirname(input), finalName + '.w3g')); 
 // generate-summary.js). Non-fatal: a failed/missing summary just means the
 // card publishes without one, not that the whole game fails to go live.
 let summary = null;
+const parsedForFacts = JSON.parse(wc3vBuf);
+const facts = extractFacts(parsedForFacts);
 try {
   const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/ANTHROPIC_API_KEY=(.+)/);
-  if (token) summary = await generateSummary(JSON.parse(wc3vBuf), token[1].trim());
+  if (token) summary = await generateSummary(parsedForFacts, token[1].trim());
 } catch (e) {
   console.log(`Summary generation failed (publishing without one): ${e.message}`);
 }
@@ -157,7 +159,8 @@ const timeLabel = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute:
 const htmlPath = path.join(DEPLOY_DIR, 'my-replays.html');
 let html = fs.readFileSync(htmlPath, 'utf8');
 const summaryField = summary ? `, summary: '${summary.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '';
-const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${summaryField} },\n`;
+const raceFields = facts ? `, dazRace: '${facts.dazootzRace}', oppRace: '${facts.opponentRace}', winner: '${facts.winner || ''}'` : '';
+const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${raceFields}${summaryField} },\n`;
 html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
 fs.writeFileSync(htmlPath, html);
 

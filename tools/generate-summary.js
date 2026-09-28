@@ -133,7 +133,7 @@ function fmtMin (sec) {
 function callClaude (apiKey, prompt) {
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 120,
+    max_tokens: 160,
     messages: [{ role: 'user', content: prompt }],
   });
   return new Promise((resolve, reject) => {
@@ -176,6 +176,25 @@ async function generateSummary (data, apiKey) {
     ? `Dominance trend (Dazootz's share of the game, 50 = even, higher = ahead): ${facts.dominanceTrend.map((v, i) => `${trendLabels[i]} ${v == null ? '?' : v}`).join(', ')}`
     : null;
 
+  // Computed, not left to the model to eyeball -- every summary was coming
+  // back with the literal phrase "close throughout" regardless of what the
+  // numbers actually showed (freitasking ended 18 points lopsided and still
+  // got called close). Ground sentence 2 in a real number instead.
+  const closenessLine = (() => {
+    const pts = facts.dominanceTrend;
+    const known = pts.map((v, i) => ({ v, i })).filter((p) => p.v != null);
+    if (known.length < 2) return null;
+    const maxDev = known.reduce((m, p) => Math.max(m, Math.abs(p.v - 50)), 0);
+    const peak = known.reduce((a, b) => (Math.abs(b.v - 50) > Math.abs(a.v - 50) ? b : a));
+    const timing = peak.i <= 1 ? 'early' : peak.i >= 3 ? 'late' : 'mid-game';
+    const towardWho = peak.v > 50 ? 'Dazootz' : facts.dazootzOpponent;
+    let label;
+    if (maxDev <= 8) label = 'close the entire game, never far from even';
+    else if (maxDev <= 18) label = `somewhat one-sided -- ${towardWho} built a real lead ${timing}`;
+    else label = `one-sided -- ${towardWho} was clearly ahead ${timing}`;
+    return `Closeness (computed from the trend above, use this framing directly): ${label}.`;
+  })();
+
   const battleLines = facts.battles.length
     ? facts.battles.map((b) => {
         const who = b.initiator === 'dazootz' ? 'Dazootz initiated' : b.initiator === 'opponent' ? `${facts.dazootzOpponent} initiated` : 'initiator unclear';
@@ -201,21 +220,23 @@ async function generateSummary (data, apiKey) {
       ? `Winner: ${facts.winner === 'dazootz' ? 'Dazootz' : facts.dazootzOpponent} (${facts.winnerConfidence} confidence, inferred from leave records)`
       : 'Winner: not determinable from this replay (leave records inconclusive) -- do not guess or imply one',
     trendLine,
+    closenessLine,
     battleLines ? `Battles:\n${battleLines}` : 'Battles: none detected',
     macroLine,
   ].filter(Boolean).join('\n');
 
-  const prompt = `Write a very short, plain, factual summary of this Warcraft III 1v1 replay in this EXACT style (3 short sentences, no more) -- this is the target style, match it closely:
+  const prompt = `Write a very short, plain, factual 2-sentence summary of this Warcraft III 1v1 replay. The replay card already shows the map, both races, and who won right above this text -- do NOT restate any of that (no map name, no race names, no "Dazootz won/lost"). Use the freed-up space to say something actually useful instead.
 
-"Undead vs Night elf on Twisted Isles map. Dazootz won, but it was close throughout. Dazootz won with macro, but almost lost on army composition."
+Style example (length and plainness only, not content -- every game is different, don't reuse this wording):
+
+"The game stayed close until fumed built a lead through the mid-game harass, and Dazootz never fully closed the gap. Dazootz out-spent fumed on resources, but let fights happen on bad terms -- picking fights only when ahead in numbers would help."
 
 Rules:
-- Sentence 1: "[Dazootz's race] vs [opponent's race] on [map] map." Just that, nothing else.
-- Sentence 2: "Dazootz won/lost, but it was [close/not close/one-sided] throughout" (or similar plain phrasing) -- based on the dominance trend below.
-- Sentence 3: one short "won/lost with X, but almost lost/won on Y" contrast naming the real deciding factor(s) (macro, army composition, micro, tech timing, map control) -- pick whichever the facts actually show, don't force this exact wording if it doesn't fit.
-- Third-grade-reading-level plain words. No stats, no numbers, no times, no jargon, no opponent name, no hype.
+- Sentence 1: how the game actually went and what the single biggest turning point was -- ground this in the "Closeness" line below (close vs. one-sided, and when/toward whom the lead formed) but describe it as an event, not a restated number. Never default to "close throughout" unless the Closeness line actually says close.
+- Sentence 2: the real deciding factor (macro, army composition, micro, tech timing, map control, fight decisions) grounded in the facts below, ending with one concrete, general thing to improve -- a skill Dazootz can carry into ANY future game, not specific to this opponent.
+- Third-grade-reading-level plain words. No stats, no numbers, no times, no jargon, no hype. You may name the opponent once if it reads naturally.
 - Never imply a rematch or rivalry -- every opponent is a one-off random matchup.
-- If the winner is marked "not determinable", say "Result unclear" instead of naming a winner, and only describe how close/one-sided it was and the key factor.
+- If the winner is marked "not determinable", don't state or imply who won -- describe the trajectory and the improvement point regardless.
 
 Use only the facts below -- don't invent anything beyond them.
 
