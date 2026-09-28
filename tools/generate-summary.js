@@ -48,9 +48,19 @@ function extractFacts (data) {
   const durationMs = (data.replay.subheader && data.replay.subheader.replayLengthMS)
     || (data.replay.parseTruncated && data.replay.parseTruncated.lastActionGameTimeMs) || null;
 
-  let winner = null; // 'dazootz' | 'opponent' | null (unresolved -- never guessed)
+  let winner = null; // 'dazootz' | 'opponent' | null (unresolved)
+  let winnerAssumed = false;
   if (data.winner && data.winner.playerId != null) {
     winner = data.winner.playerId === dazootz.id ? 'dazootz' : 'opponent';
+  } else if (!(data.replay.leaveEvents || []).length) {
+    // No leave data at all (parser stopped early, or the recording just
+    // doesn't have it) -- Dazootz's own call (2026-09-28): he quits out early
+    // on losses, never on wins, so a replay with nothing captured is safe to
+    // treat as a loss. Only applies when there's truly zero leave data; a
+    // replay that HAS leave events but they're contradictory/ambiguous still
+    // resolves to null -- that's a different failure mode, not "quit early."
+    winner = 'opponent';
+    winnerAssumed = true;
   }
 
   const tierTime = (stream, tier) => {
@@ -107,7 +117,8 @@ function extractFacts (data) {
     dazootzTier2Sec: tierTime(dazPlayer.tierStream, 2),
     dazootzTier3Sec: tierTime(dazPlayer.tierStream, 3),
     winner,
-    winnerConfidence: data.winner ? data.winner.confidence : null,
+    winnerAssumed,
+    winnerConfidence: winnerAssumed ? 'assumed' : (data.winner ? data.winner.confidence : null),
     // Dazootz's dominance score at 0/25/50/75/100% of the game -- 50 even,
     // above is ahead. null entries mean no dominance data was available.
     dominanceTrend: trend,
@@ -216,9 +227,11 @@ async function generateSummary (data, apiKey) {
     `Opponent name: ${facts.dazootzOpponent}`,
     `Opponent: ${facts.opponentRace}${facts.opponentApm != null ? `, ${facts.opponentApm} effective APM` : ''}`,
     facts.durationSec != null ? `Game length: ${fmtMin(facts.durationSec)}` : null,
-    facts.winner
-      ? `Winner: ${facts.winner === 'dazootz' ? 'Dazootz' : facts.dazootzOpponent} (${facts.winnerConfidence} confidence, inferred from leave records)`
-      : 'Winner: not determinable from this replay (leave records inconclusive) -- do not guess or imply one',
+    facts.winnerAssumed
+      ? `Winner: Dazootz lost (assumed -- no leave data was captured at all, and Dazootz quits out early on losses, never on wins, so this is treated as a loss)`
+      : facts.winner
+        ? `Winner: ${facts.winner === 'dazootz' ? 'Dazootz' : facts.dazootzOpponent} (${facts.winnerConfidence} confidence, inferred from leave records)`
+        : 'Winner: not determinable from this replay (leave records inconclusive) -- do not guess or imply one',
     trendLine,
     closenessLine,
     battleLines ? `Battles:\n${battleLines}` : 'Battles: none detected',
