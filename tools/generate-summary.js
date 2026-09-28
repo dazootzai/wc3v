@@ -133,7 +133,7 @@ function fmtMin (sec) {
 function callClaude (apiKey, prompt) {
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 400,
+    max_tokens: 120,
     messages: [{ role: 'user', content: prompt }],
   });
   return new Promise((resolve, reject) => {
@@ -205,19 +205,23 @@ async function generateSummary (data, apiKey) {
     macroLine,
   ].filter(Boolean).join('\n');
 
-  const prompt = `Write a short analysis (4-6 sentences, one paragraph) of this Warcraft III 1v1 replay for Dazootz's own replay-sharing page -- he wants to know what actually decided the game and what to work on, not a recap. Plain, direct tone, second person to Dazootz ("you"), no hype or "epic battle" filler.
+  const prompt = `Write a very short, plain, factual summary of this Warcraft III 1v1 replay in this EXACT style (3 short sentences, no more) -- this is the target style, match it closely:
 
-Cover, using only the facts given below -- don't invent anything beyond them:
-- How close the game actually was (the dominance trend) and whether it swung early or late.
-- The key battle(s): which one(s) mattered most (biggest dominance swing), who started them, and what that suggests.
-- A real macro/micro comparison (supply utilization, resources spent, gold lost in fights) -- not just numbers restated, but what they mean (e.g., low supply utilization suggests production sat idle; heavy gold lost in fights with little dominance gain suggests bad fights).
-- One concrete, specific thing Dazootz could improve next game, grounded in what actually happened in THIS game -- not generic advice.
+"Undead vs Night elf on Twisted Isles map. Dazootz won, but it was close throughout. Dazootz won with macro, but almost lost on army composition."
 
-If the winner is marked "not determinable", do not state or imply who won -- analyze the game's trajectory and what to improve regardless. Refer to the opponent by their actual name given below (not "the opponent"), even if it looks like an ordinary word.
+Rules:
+- Sentence 1: "[Dazootz's race] vs [opponent's race] on [map] map." Just that, nothing else.
+- Sentence 2: "Dazootz won/lost, but it was [close/not close/one-sided] throughout" (or similar plain phrasing) -- based on the dominance trend below.
+- Sentence 3: one short "won/lost with X, but almost lost/won on Y" contrast naming the real deciding factor(s) (macro, army composition, micro, tech timing, map control) -- pick whichever the facts actually show, don't force this exact wording if it doesn't fit.
+- Third-grade-reading-level plain words. No stats, no numbers, no times, no jargon, no opponent name, no hype.
+- Never imply a rematch or rivalry -- every opponent is a one-off random matchup.
+- If the winner is marked "not determinable", say "Result unclear" instead of naming a winner, and only describe how close/one-sided it was and the key factor.
+
+Use only the facts below -- don't invent anything beyond them.
 
 ${lines}
 
-Analysis:`;
+Summary:`;
 
   return callClaude(apiKey, prompt);
 }

@@ -14,6 +14,7 @@ const DEPLOY_DIR = path.join(__dirname, '..', '..', 'wc3v-deploy');
 const HTML_PATH = path.join(DEPLOY_DIR, 'my-replays.html');
 
 async function main () {
+  const force = process.argv.includes('--force');
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   const files = fs.readdirSync(path.join(DEPLOY_DIR, 'replays')).filter((f) => f.endsWith('.wc3v'));
 
@@ -23,7 +24,7 @@ async function main () {
     const lineRe = new RegExp(`\\{ file: '${file}'[^}]*\\}`);
     const m = updated.match(lineRe);
     if (!m) { console.log(`skip ${file}: not in REPLAYS array`); continue; }
-    if (/summary:/.test(m[0])) { console.log(`skip ${file}: already has a summary`); continue; }
+    if (/summary:/.test(m[0]) && !force) { console.log(`skip ${file}: already has a summary`); continue; }
 
     console.log(`generating: ${file}...`);
     const data = JSON.parse(fs.readFileSync(path.join(DEPLOY_DIR, 'replays', f), 'utf8'));
@@ -35,7 +36,8 @@ async function main () {
       continue;
     }
     const escaped = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const withSummary = m[0].replace(/\}$/, `, summary: '${escaped}' }`);
+    const stripped = m[0].replace(/,\s*summary:\s*'(?:[^'\\]|\\.)*'/, '');
+    const withSummary = stripped.replace(/\}$/, `, summary: '${escaped}' }`);
     updated = updated.replace(m[0], withSummary);
     console.log(`  done (${text.length} chars)`);
   }
