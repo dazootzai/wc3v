@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+/*
+  Full pipeline from a freshly-captured .w3g to a live deploy: parse, name,
+  file into both repos, add to the site, prune to the cap, deploy, commit +
+  push both repos, notify. Wired into wc3-replay-watch.sh so every real game
+  Dazootz plays goes live with no manual step.
+
+  Usage: node tools/publish-replay.js <path-to-LastReplay_TIMESTAMP.w3g>
+
+  Idempotent: if the computed final filename already exists in
+  ../wc3v-deploy/replays/, exits quietly (handles the watcher accidentally
+  firing twice on the same file).
+
+  New-map case (this replay's map has never been converted): can't produce
+  a display name or terrain, so it skips with a notification instead of
+  guessing -- see README.md's "Rebuilding from scratch" for the manual
+  extraction step, then rerun this script on the same .w3g.
+*/
+const fs = require('fs');
+const path = require('path');
+const zlib = require('zlib');
+const { execFileSync } = require('child_process');
+
+const WC3V_DIR = path.join(__dirname, '..');
+const DEPLOY_DIR = path.join(WC3V_DIR, '..', 'wc3v-deploy');
+const TOKEN_ENV = path.join(process.env.HOME, '.config', 'wc3-replays', 'deploy.env');
+
+// Raw map folder name -> display name. Add an entry here the first time a
+// new map is manually extracted (see README.md), or this script will skip
+// that map with "unknown map" rather than guess a name.
+const MAP_DISPLAY_NAMES = {
+  'AutumnLeaves_S2_v2.0': 'Autumn Leaves',
+  'ConcealedHill_S2': 'Concealed Hill',
+  'EchoIsles_S2_v2.2': 'Echo Isles',
+  'Hammerfall_S3': 'Hammerfall',
+  'LastRefuge_S2_v1.5': 'Last Refuge',
+  'NorthernIsles_S2': 'Northern Isles',
+  'Tidehunters_S2_v1.2': 'Tidehunters',
+};
+
+function notify (title, body) {
+  try { execFileSync('notify-send', [title, body]); } catch (e) { /* best-effort */ }
+  console.log(`${title}: ${body}`);
+}
+
+function fail (msg) {
+  notify('WC3 Replay Publish', msg);
+  process.exit(1);
+}
+
+const dryRun = process.argv.includes('--dry-run');
+const input = process.argv[2];
+if (!input || !fs.existsSync(input)) fail(`No such file: ${input}`);
+
+// LastReplay_2026-09-28_15-30-00.w3g -> the watcher's own capture instant,
+// which is the timestamp source of truth (Charles, 2026-09-28: "the time
+// should be when the watcher renames the file").
+const stampMatch = path.basename(input).match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+if (!stampMatch) fail(`Filename doesn't carry a watcher timestamp: ${path.basename(input)}`);
+const [, yyyy, mm, dd, HH, MM] = stampMatch;
+const tempName = `publish-tmp-${yyyy}${mm}${dd}${HH}${MM}`;
+
+// 1. Parse.
+const rawDest = path.join(WC3V_DIR, 'replays', tempName + '.w3g');
+fs.copyFileSync(input, rawDest);
+try {
+  execFileSync('node', ['wc3v.js', `--replay=${tempName}`], { cwd: WC3V_DIR, stdio: 'pipe' });
+} catch (e) {
+  fs.unlinkSync(rawDest);
+  fail(`Parse failed: ${e.message.split('\n')[0]}`);
+}
+
+// 2. Extract map + opponent from the parsed output (same fallback chain
+// used manually earlier -- meta.players is the Reforged shape, playerRecords
+// the classic one; neither is guaranteed).
+const parsedGzPath = path.join(WC3V_DIR, 'client', 'replays', tempName + '.wc3v.gz');
+const parsed = JSON.parse(zlib.gunzipSync(fs.readFileSync(parsedGzPath)));
+const meta = parsed.replay.metadata;
+const mapFolder = meta.map.mapName.split('/').pop().replace(/\.w3x$/i, '').replace(/^\(\d+\)/, '');
+
+let names = [];
+if (meta.players) {
+  names = Object.values(meta.players).filter((p) => p.name && !/neutral|blizzard/i.test(p.name)).map((p) => p.name.split('#')[0]);
+} else if (meta.playerRecords) {
+  const seen = new Set();
+  for (const p of meta.playerRecords) {
+    if (p.playerName && !seen.has(p.playerId) && !/neutral|blizzard/i.test(p.playerName)) {
+      seen.add(p.playerId);
+      names.push(p.playerName.split('#')[0]);
+    }
+  }
+}
+const opponent = names.find((n) => n.toLowerCase() !== 'dazootz');
+if (!opponent) {
+  fs.unlinkSync(rawDest);
+  fs.unlinkSync(parsedGzPath);
+  fail(`Couldn't find an opponent name in ${path.basename(input)} (parsed but names were empty/unrecognized -- check manually)`);
+}
+
+const mapDisplay = MAP_DISPLAY_NAMES[mapFolder];
+const mapDirExists = fs.existsSync(path.join(DEPLOY_DIR, 'maps', mapFolder));
+if (!mapDisplay || !mapDirExists) {
+  fs.unlinkSync(rawDest);
+  fs.unlinkSync(parsedGzPath);
+  fail(`Unknown map "${mapFolder}" -- extract and convert it manually first (README.md), add it to MAP_DISPLAY_NAMES, then rerun on this .w3g`);
+}
+
+// 3. Compute the final name and check idempotency.
+const opponentSlug = opponent.toLowerCase().replace(/[^a-z0-9]+/g, '');
+const finalName = `${yyyy}-${mm}-${dd}_${HH}${MM}_dazootz-vs-${opponentSlug}`;
+if (fs.existsSync(path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'))) {
+  fs.unlinkSync(rawDest);
+  fs.unlinkSync(parsedGzPath);
+  console.log(`Already published as ${finalName} -- nothing to do.`);
+  process.exit(0);
+}
+
+if (dryRun) {
+  console.log(`Would publish as: ${finalName}`);
+  console.log(`  map: ${mapDisplay}  opponent: ${opponent}`);
+  fs.unlinkSync(rawDest);
+  fs.unlinkSync(parsedGzPath);
+  process.exit(0);
+}
+
+// 4. Rename into place in the wc3v fork (canonical source copies).
+const finalRaw = path.join(WC3V_DIR, 'replays', finalName + '.w3g');
+const finalParsedGz = path.join(WC3V_DIR, 'client', 'replays', finalName + '.wc3v.gz');
+fs.renameSync(rawDest, finalRaw);
+fs.renameSync(parsedGzPath, finalParsedGz);
+const wc3vBuf = zlib.gunzipSync(fs.readFileSync(finalParsedGz));
+
+// 5. Copy both formats into the deploy repo.
+fs.copyFileSync(finalRaw, path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'));
+fs.writeFileSync(path.join(DEPLOY_DIR, 'replays', finalName + '.wc3v'), wc3vBuf);
+
+// 6. Also rename the live capture in the actual WC3 Replays folder, same as
+// every existing file there (deck-setup/README.md's own convention, even
+// though deck-setup/ itself isn't in use -- keeps that folder's names
+// consistent with everything else for anyone browsing it directly).
+try { fs.renameSync(input, path.join(path.dirname(input), finalName + '.w3g')); } catch (e) { /* not fatal */ }
+
+// 7. Insert into REPLAYS, newest-first (top of the array).
+const dateObj = new Date(`${yyyy}-${mm}-${dd}T${HH}:${MM}:00`);
+const day = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const timeLabel = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+const htmlPath = path.join(DEPLOY_DIR, 'my-replays.html');
+let html = fs.readFileSync(htmlPath, 'utf8');
+const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}' },\n`;
+html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
+fs.writeFileSync(htmlPath, html);
+
+// 8. Cap enforcement, then publish the HTML.
+execFileSync('node', ['scripts/prune-replays.js'], { cwd: DEPLOY_DIR, stdio: 'inherit' });
+fs.copyFileSync(htmlPath, path.join(DEPLOY_DIR, 'index.html'));
+
+// 9. Deploy.
+const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/CLOUDFLARE_API_TOKEN=(.+)/)[1].trim();
+try {
+  execFileSync('npx', ['--yes', 'wrangler', 'deploy'], {
+    cwd: DEPLOY_DIR,
+    env: { ...process.env, CLOUDFLARE_API_TOKEN: token },
+    stdio: 'pipe',
+  });
+} catch (e) {
+  fail(`Deploy failed for ${finalName}: ${e.message.split('\n')[0]} (files are in place locally -- retry with: cd ${DEPLOY_DIR} && npx wrangler deploy)`);
+}
+
+// 10. Commit + push both repos so the Deck and any other device stay in sync.
+for (const repo of [WC3V_DIR, DEPLOY_DIR]) {
+  try {
+    execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', `Publish ${finalName}`], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['push'], { cwd: repo, stdio: 'pipe' });
+  } catch (e) {
+    // A commit can legitimately no-op (wc3v fork has nothing new to commit
+    // most of the time -- only the deploy repo actually changed); only a
+    // real push failure is worth surfacing.
+    if (/nothing to commit/i.test(e.stdout || e.message)) continue;
+    notify('WC3 Replay Publish', `${finalName} is live, but git push failed in ${path.basename(repo)}: ${e.message.split('\n')[0]}`);
+  }
+}
+
+notify('WC3 Replay Published', `Dazootz vs ${opponent} (${mapDisplay}) is live on the site.`);
