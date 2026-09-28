@@ -34,6 +34,7 @@ process.env.PATH = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
 
 const MAP_DISPLAY_NAMES = require('./map-display-names');
 const { generateSummary, extractFacts } = require('./generate-summary');
+const { applyRecorderWinner } = require('./recorder-result');
 
 function notify (title, body) {
   try { execFileSync('notify-send', [title, body]); } catch (e) { /* best-effort */ }
@@ -127,7 +128,18 @@ const finalRaw = path.join(WC3V_DIR, 'replays', finalName + '.w3g');
 const finalParsedGz = path.join(WC3V_DIR, 'client', 'replays', finalName + '.wc3v.gz');
 fs.renameSync(rawDest, finalRaw);
 fs.renameSync(parsedGzPath, finalParsedGz);
-const wc3vBuf = zlib.gunzipSync(fs.readFileSync(finalParsedGz));
+let wc3vBuf = zlib.gunzipSync(fs.readFileSync(finalParsedGz));
+// Make the stored winner match Dazootz's own result (see recorder-result.js), so
+// the viewer's match summary agrees with the badge on the list.
+{
+  const d = JSON.parse(wc3vBuf);
+  const ids = Object.entries((d.replay.metadata.players || {})).map(([id, p]) => ({ id: +id, n: (p.name || '').split('#')[0].toLowerCase() }));
+  const recs = (d.replay.metadata.playerRecords || []).map((p) => ({ id: p.playerId, n: (p.playerName || '').split('#')[0].toLowerCase() }));
+  const all = ids.concat(recs).filter((x) => x.n && !/neutral|blizzard/.test(x.n));
+  const me = all.find((x) => x.n === 'dazootz');
+  const them = all.find((x) => x.n !== 'dazootz');
+  if (me && them && applyRecorderWinner(d, me.id, them.id)) wc3vBuf = Buffer.from(JSON.stringify(d));
+}
 
 // 5. Copy both formats into the deploy repo.
 fs.copyFileSync(finalRaw, path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'));

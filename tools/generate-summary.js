@@ -12,6 +12,7 @@ const fs = require('fs');
 const zlib = require('zlib');
 const https = require('https');
 const MAP_DISPLAY_NAMES = require('./map-display-names');
+const { recorderResult } = require('./recorder-result');
 
 // E for Night Elf, not N -- checked against every race code actually
 // present across all 8 real replays (only E/H/O/U ever appear) rather
@@ -50,7 +51,10 @@ function extractFacts (data) {
 
   let winner = null; // 'dazootz' | 'opponent' | null (unresolved)
   let winnerAssumed = false;
-  if (data.winner && data.winner.playerId != null) {
+  const rec = recorderResult(data);   // Dazootz's own result, from the observer-seat record
+  if (rec) {
+    winner = rec === 'win' ? 'dazootz' : 'opponent';
+  } else if (data.winner && data.winner.playerId != null) {
     winner = data.winner.playerId === dazootz.id ? 'dazootz' : 'opponent';
   } else if (!(data.replay.leaveEvents || []).length) {
     // No leave data at all (parser stopped early, or the recording just
@@ -118,7 +122,7 @@ function extractFacts (data) {
     dazootzTier3Sec: tierTime(dazPlayer.tierStream, 3),
     winner,
     winnerAssumed,
-    winnerConfidence: winnerAssumed ? 'assumed' : (data.winner ? data.winner.confidence : null),
+    winnerConfidence: winnerAssumed ? 'assumed' : (rec ? 'high' : (data.winner ? data.winner.confidence : null)),
     // Dazootz's dominance score at 0/25/50/75/100% of the game -- 50 even,
     // above is ahead. null entries mean no dominance data was available.
     dominanceTrend: trend,

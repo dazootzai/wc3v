@@ -15,12 +15,15 @@ const HTML_PATH = path.join(DEPLOY_DIR, 'replays-data.js');
 
 async function main () {
   const force = process.argv.includes('--force');
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const only = onlyArg ? onlyArg.slice(7) : null;
   const html = fs.readFileSync(HTML_PATH, 'utf8');
   const files = fs.readdirSync(path.join(DEPLOY_DIR, 'replays')).filter((f) => f.endsWith('.wc3v'));
 
   let updated = html;
   for (const f of files) {
     const file = f.replace(/\.wc3v$/, '');
+    if (only && !file.includes(only)) continue;
     const lineRe = new RegExp(`\\{ file: '${file}'[^}]*\\}`);
     const m = updated.match(lineRe);
     if (!m) { console.log(`skip ${file}: not in REPLAYS array`); continue; }
