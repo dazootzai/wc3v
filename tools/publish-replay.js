@@ -32,18 +32,8 @@ const TOKEN_ENV = path.join(process.env.HOME, '.config', 'wc3-replays', 'deploy.
 // rather than hardcode an absolute path at every execFileSync call site.
 process.env.PATH = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
 
-// Raw map folder name -> display name. Add an entry here the first time a
-// new map is manually extracted (see README.md), or this script will skip
-// that map with "unknown map" rather than guess a name.
-const MAP_DISPLAY_NAMES = {
-  'AutumnLeaves_S2_v2.0': 'Autumn Leaves',
-  'ConcealedHill_S2': 'Concealed Hill',
-  'EchoIsles_S2_v2.2': 'Echo Isles',
-  'Hammerfall_S3': 'Hammerfall',
-  'LastRefuge_S2_v1.5': 'Last Refuge',
-  'NorthernIsles_S2': 'Northern Isles',
-  'Tidehunters_S2_v1.2': 'Tidehunters',
-};
+const MAP_DISPLAY_NAMES = require('./map-display-names');
+const { generateSummary } = require('./generate-summary');
 
 function notify (title, body) {
   try { execFileSync('notify-send', [title, body]); } catch (e) { /* best-effort */ }
@@ -54,6 +44,8 @@ function fail (msg) {
   notify('WC3 Replay Publish', msg);
   process.exit(1);
 }
+
+(async () => {
 
 const dryRun = process.argv.includes('--dry-run');
 const input = process.argv[2];
@@ -147,21 +139,33 @@ fs.writeFileSync(path.join(DEPLOY_DIR, 'replays', finalName + '.wc3v'), wc3vBuf)
 // consistent with everything else for anyone browsing it directly).
 try { fs.renameSync(input, path.join(path.dirname(input), finalName + '.w3g')); } catch (e) { /* not fatal */ }
 
-// 7. Insert into REPLAYS, newest-first (top of the array).
+// 7. AI summary (battles, macro/micro, what to improve -- see
+// generate-summary.js). Non-fatal: a failed/missing summary just means the
+// card publishes without one, not that the whole game fails to go live.
+let summary = null;
+try {
+  const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/ANTHROPIC_API_KEY=(.+)/);
+  if (token) summary = await generateSummary(JSON.parse(wc3vBuf), token[1].trim());
+} catch (e) {
+  console.log(`Summary generation failed (publishing without one): ${e.message}`);
+}
+
+// 8. Insert into REPLAYS, newest-first (top of the array).
 const dateObj = new Date(`${yyyy}-${mm}-${dd}T${HH}:${MM}:00`);
 const day = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const timeLabel = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 const htmlPath = path.join(DEPLOY_DIR, 'my-replays.html');
 let html = fs.readFileSync(htmlPath, 'utf8');
-const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}' },\n`;
+const summaryField = summary ? `, summary: '${summary.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '';
+const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${summaryField} },\n`;
 html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
 fs.writeFileSync(htmlPath, html);
 
-// 8. Cap enforcement, then publish the HTML.
+// 9. Cap enforcement, then publish the HTML.
 execFileSync('node', ['scripts/prune-replays.js'], { cwd: DEPLOY_DIR, stdio: 'inherit' });
 fs.copyFileSync(htmlPath, path.join(DEPLOY_DIR, 'index.html'));
 
-// 9. Deploy.
+// 10. Deploy.
 const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/CLOUDFLARE_API_TOKEN=(.+)/)[1].trim();
 try {
   execFileSync('npx', ['--yes', 'wrangler', 'deploy'], {
@@ -173,7 +177,7 @@ try {
   fail(`Deploy failed for ${finalName}: ${e.message.split('\n')[0]} (files are in place locally -- retry with: cd ${DEPLOY_DIR} && npx wrangler deploy)`);
 }
 
-// 10. Commit + push both repos so the Deck and any other device stay in sync.
+// 11. Commit + push both repos so the Deck and any other device stay in sync.
 for (const repo of [WC3V_DIR, DEPLOY_DIR]) {
   try {
     execFileSync('git', ['add', '-A'], { cwd: repo, stdio: 'pipe' });
@@ -189,3 +193,5 @@ for (const repo of [WC3V_DIR, DEPLOY_DIR]) {
 }
 
 notify('WC3 Replay Published', `Dazootz vs ${opponent} (${mapDisplay}) is live on the site.`);
+
+})().catch((e) => fail(`Unexpected error: ${e.message}`));
