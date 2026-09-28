@@ -661,21 +661,25 @@ const computeGameMode = (playersMap) => {
 //     reason=0c result=01     4 won,   0 lost
 //     reason=01 result=0d     2 won,   6 lost
 //
-// `result` is the whole signal and `reason` adds nothing: 0x09 means that seat
-// won and 0x07 means it did not, whatever reason accompanies them. (The two
-// "won" rows under result=07 and the split on 0x0D come from the site's own
-// detector rather than a human-entered winner, and that detector is a port of
-// the same w3gjs rule this replaces.) Anything else is not a verdict.
+// The corpus comment above (and the mapping it justified) turned out to be
+// backwards in practice: Dazootz, 2026-09-28, checked 6 of his own real
+// Reforged (version 10200) games against what actually happened and every
+// single one came out inverted -- 3 real wins reported as losses, 3 real
+// losses reported as wins, no exceptions. Whatever that corpus validated
+// against (possibly a different replay version, or a ground truth that was
+// itself circular), it doesn't hold for this data. Flipped 0x09/0x07/0x08/0x0B
+// below to match the confirmed sample; 0x0d stays "no claim" either way (both
+// win and loss patterns pair it with the OTHER seat's code doing the work).
 //
 // So: read each seat's own flag, then require the seats to AGREE — one winning
 // team, and no seat on it claiming a loss. Disagreement returns null. A guess
 // dressed as an answer is the failure mode being fixed here, so the
 // last-leaver branch is gone; `null` means unknown and the UI says so.
 const LEAVE_RESULT = {
-  '09000000': 'win',
-  '07000000': 'loss',
-  '08000000': 'loss',
-  '0b000000': 'loss',
+  '09000000': 'loss',
+  '07000000': 'win',
+  '08000000': 'win',
+  '0b000000': 'win',
   '01000000': 'left'   // disconnect. Says nothing about the outcome on its own.
 };
 
