@@ -2,7 +2,7 @@
 /*
   One-time (well, "run whenever needed") pass: generate an AI summary for
   every replay in ../wc3v-deploy/replays/*.wc3v that doesn't have one yet in
-  my-replays.html's REPLAYS array, and write it in as a `summary` field.
+  replays-data.js's REPLAYS array, and write it in as a `summary` field.
 
   Usage: ANTHROPIC_API_KEY=... node tools/backfill-summaries.js
 */
@@ -11,7 +11,7 @@ const path = require('path');
 const { generateSummary, extractFacts } = require('./generate-summary');
 
 const DEPLOY_DIR = path.join(__dirname, '..', '..', 'wc3v-deploy');
-const HTML_PATH = path.join(DEPLOY_DIR, 'my-replays.html');
+const HTML_PATH = path.join(DEPLOY_DIR, 'replays-data.js');
 
 async function main () {
   const force = process.argv.includes('--force');
@@ -49,7 +49,7 @@ async function main () {
   }
 
   fs.writeFileSync(HTML_PATH, updated);
-  console.log('\nWrote my-replays.html. Next: cp my-replays.html index.html && npx wrangler deploy');
+  console.log('\nWrote replays-data.js. Next: npx wrangler deploy');
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

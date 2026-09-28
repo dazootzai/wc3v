@@ -156,7 +156,7 @@ try {
 const dateObj = new Date(`${yyyy}-${mm}-${dd}T${HH}:${MM}:00`);
 const day = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 const timeLabel = dateObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-const htmlPath = path.join(DEPLOY_DIR, 'my-replays.html');
+const htmlPath = path.join(DEPLOY_DIR, 'replays-data.js');
 let html = fs.readFileSync(htmlPath, 'utf8');
 const summaryField = summary ? `, summary: '${summary.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '';
 const raceFields = facts ? `, dazRace: '${facts.dazootzRace}', oppRace: '${facts.opponentRace}', winner: '${facts.winner || ''}'` : '';
@@ -166,7 +166,7 @@ fs.writeFileSync(htmlPath, html);
 
 // 9. Cap enforcement, then publish the HTML.
 execFileSync('node', ['scripts/prune-replays.js'], { cwd: DEPLOY_DIR, stdio: 'inherit' });
-fs.copyFileSync(htmlPath, path.join(DEPLOY_DIR, 'index.html'));
+fs.copyFileSync(path.join(DEPLOY_DIR, 'my-replays.html'), path.join(DEPLOY_DIR, 'index.html'));
 
 // 10. Deploy.
 const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/CLOUDFLARE_API_TOKEN=(.+)/)[1].trim();
