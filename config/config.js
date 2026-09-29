@@ -40,6 +40,16 @@ const config = {
 	//                  shift-click); a multi-unit SELECT is the complete new
 	//                  selection and replaces.
 	selectionRule: 'merge-resync',
+	// Tie unknown selected object ids to this player's still-unmatched units.
+	// SelectSubgroup names ONE unit per press, so a player who selects a group by
+	// hotkey or drag leaves most of it unmatched for the whole game; orders sent to
+	// the group then reach only the few matched units and the rest stand at their
+	// spawn point. With this on, an unknown id selected together with a known
+	// mobile unit is bound to the earliest-trained unmatched mobile unit that
+	// existed by then. Unit TYPE is a guess (id order carries no type), so a wrong
+	// pairing shows as a right-sized group with the wrong model mix, never as
+	// missing units. Grade with tools/adopt-check.js.
+	adoptUnknownSelection: true,
 	// Block a tree doodad's pathing square CENTRED on the doodad position
 	// instead of growing it +x/-y from that point. The doodad position is a
 	// centre (the renderer draws the canopy there), so the old box sat half a
