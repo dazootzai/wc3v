@@ -441,6 +441,7 @@ const doParsing = async (input, options = {}) => {
     });
 
     if (toRemove.size > 0) {
+      (player._buildingAttempts || []).forEach(a => { if (toRemove.has(a.building)) a.status = 'dedupRemoved'; });
       player.units = player.units.filter(u => !toRemove.has(u));
 
       // also remove corresponding addBuilding events from eventStream

@@ -1101,7 +1101,8 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
           gameTime: a.gameTime,
           x: a.x,
           y: a.y,
-          status: a.status
+          status: a.status,
+          cancelledAt: a.cancelledAt
         })),
         supplyBumps: (_supplyBumps || []).map(b => ({
           gameTime: b.gameTime,
