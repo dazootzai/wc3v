@@ -9,5 +9,6 @@ module.exports = {
   'Hammerfall_S3': 'Hammerfall',
   'LastRefuge_S2_v1.5': 'Last Refuge',
   'NorthernIsles_S2': 'Northern Isles',
+  'TerenasStand_LV': 'Terenas Stand',
   'Tidehunters_S2_v1.2': 'Tidehunters',
 };
