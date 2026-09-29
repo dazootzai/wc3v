@@ -392,11 +392,18 @@ const doParsing = async (input, options = {}) => {
     });
   }
 
-  // post-parse: remove overlapping same-type buildings (destroyed-and-rebuilt or missed cancellation)
+  // post-parse: overlapping same-type buildings (destroyed-and-rebuilt, or a
+  // missed cancellation). A building that stood for a real stretch before the
+  // rebuild is kept and marked gone at the moment its replacement started --
+  // it existed (a tower rush tower, a farm that later burned) and the viewer
+  // hides a building at destroyedAt. Only a very short overlap, which is almost
+  // certainly a missed cancel/re-place, is dropped outright as before.
+  const KEEP_OVERLAP_MIN_MS = 15000;
   Object.values(playerManager.players).forEach(player => {
     if (parseInt(player.id) >= 24) return;
     const buildings = player.units.filter(u => u.isBuilding);
-    const toRemove = new Set();
+    const startOf = (u) => u.constructionStartTime || u.spawnTime || 0;
+    const supersededAt = new Map();   // older building -> earliest start of a building that overlaps it later
 
     for (let i = 0; i < buildings.length; i++) {
       for (let j = i + 1; j < buildings.length; j++) {
@@ -409,13 +416,26 @@ const doParsing = async (input, options = {}) => {
         const minSpacing = colA + colB;
 
         if (dist < minSpacing) {
-          // keep the later one (higher spawnTime), remove the earlier
+          // the earlier one is the one that was replaced
           const older = a.spawnTime <= b.spawnTime ? a : b;
-          toRemove.add(older);
-          console.logger(`Building dedup: removing overlapping ${older.displayName} at (${older.currentX},${older.currentY})`);
+          const newer = older === a ? b : a;
+          const at = startOf(newer);
+          if (!supersededAt.has(older) || at < supersededAt.get(older)) supersededAt.set(older, at);
         }
       }
     }
+
+    const toRemove = new Set();
+    supersededAt.forEach((at, older) => {
+      if (at - startOf(older) >= KEEP_OVERLAP_MIN_MS && !older.destroyedAt) {
+        older.destroyedAt = at;
+        older.supersededByRebuild = true;
+        console.logger(`Building dedup: keeping earlier ${older.displayName} at (${older.currentX},${older.currentY}) until ${at}ms (rebuilt)`);
+      } else {
+        toRemove.add(older);
+        console.logger(`Building dedup: removing overlapping ${older.displayName} at (${older.currentX},${older.currentY})`);
+      }
+    });
 
     if (toRemove.size > 0) {
       player.units = player.units.filter(u => !toRemove.has(u));
