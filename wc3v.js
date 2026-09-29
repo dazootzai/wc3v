@@ -413,7 +413,10 @@ const doParsing = async (input, options = {}) => {
         const dist = utils.distance(a.currentX, a.currentY, b.currentX, b.currentY);
         const colA = (a.balanceInfo && a.balanceInfo.collisionSize) || 72;
         const colB = (b.balanceInfo && b.balanceInfo.collisionSize) || 72;
-        const minSpacing = colA + colB;
+        // Neighbours placed side by side (a row of Ziggurats or farms) sit
+        // about one footprint apart -- that is not an overlap. Only centres
+        // much closer than that are the same spot built twice.
+        const minSpacing = (colA + colB) * 0.6;
 
         if (dist < minSpacing) {
           // the earlier one is the one that was replaced
