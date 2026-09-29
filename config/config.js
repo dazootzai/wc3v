@@ -49,7 +49,7 @@ const config = {
 	// existed by then. Unit TYPE is a guess (id order carries no type), so a wrong
 	// pairing shows as a right-sized group with the wrong model mix, never as
 	// missing units. Grade with tools/adopt-check.js.
-	adoptUnknownSelection: true,
+	adoptUnknownSelection: process.env.WC3V_NO_ADOPT ? false : true,
 	// Block a tree doodad's pathing square CENTRED on the doodad position
 	// instead of growing it +x/-y from that point. The doodad position is a
 	// centre (the renderer draws the canopy there), so the old box sat half a
