@@ -77,7 +77,7 @@ function serveDeployDir (root) {
     r.writeHead(200, { 'content-type': types[path.extname(f)] || 'application/octet-stream', 'cache-control': 'no-store' });
     fs.createReadStream(f).pipe(r);
   });
-  return new Promise((resolve) => server.listen(0, () => resolve(server)));
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
 async function withBrowser (mobile, W, H, fn) {
@@ -139,7 +139,7 @@ async function verifyRender (replayId, expectedDurationMs, opts = {}) {
   const outDir = path.join(REVIEW_DIR, replayId);
   fs.mkdirSync(outDir, { recursive: true });
   const server = await serveDeployDir(DEPLOY_DIR);
-  const base = `http://localhost:${server.address().port}/wc3/viewer?r=${encodeURIComponent(replayId)}`;
+  const base = `http://127.0.0.1:${server.address().port}/wc3/viewer?r=${encodeURIComponent(replayId)}`;
   const shots = [];
 
   try {
