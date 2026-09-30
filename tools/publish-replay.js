@@ -35,6 +35,7 @@ process.env.PATH = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
 const MAP_DISPLAY_NAMES = require('./map-display-names');
 const { generateSummary, extractFacts } = require('./generate-summary');
 const { applyRecorderWinner } = require('./recorder-result');
+const { verifyData, verifyRender } = require('./verify-replay');
 
 function notify (title, body) {
   try { execFileSync('notify-send', [title, body]); } catch (e) { /* best-effort */ }
@@ -187,6 +188,38 @@ const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent:
 html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
 fs.writeFileSync(htmlPath, html);
 
+// 8b. Review check: is the parsed file complete, and does the real viewer load
+// and draw it? Errors hold the game back (moved aside, not deployed); warnings
+// publish but are reported. --force skips the hold. See verify-replay.js.
+const review = verifyData(parsedForFacts);
+try {
+  const r = await verifyRender(finalName, parsedForFacts.replay.subheader && parsedForFacts.replay.subheader.replayLengthMS);
+  review.errors.push(...r.errors);
+  review.warnings.push(...r.warnings);
+} catch (e) {
+  review.warnings.push(`visual check could not run: ${e.message}`);
+}
+try {
+  const outDir = path.join(require('./verify-replay').REVIEW_DIR, finalName);
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(review, null, 2));
+} catch (e) { /* not fatal */ }
+
+if (review.errors.length && !process.argv.includes('--force')) {
+  const held = path.join(process.env.HOME, 'wc3-held', finalName);
+  fs.mkdirSync(held, { recursive: true });
+  for (const f of [path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'), path.join(DEPLOY_DIR, 'replays', finalName + '.wc3v'), finalRaw, finalParsedGz]) {
+    try { fs.renameSync(f, path.join(held, path.basename(f))); } catch (e) { /* already gone */ }
+  }
+  let list = fs.readFileSync(htmlPath, 'utf8');
+  list = list.split('\n').filter((l) => !l.includes(`file: '${finalName}'`)).join('\n');
+  fs.writeFileSync(htmlPath, list);
+  notify('WC3 Replay HELD', `Dazootz vs ${opponent} was NOT published: ${review.errors.join('; ')}. Kept in ${held} (publish anyway with --force). Screenshots: ~/wc3-review/${finalName}`);
+  process.exit(0);
+}
+
+if (process.argv.includes('--no-deploy')) { console.log('--no-deploy: review passed, stopping before deploy'); process.exit(0); }
+
 // 9. Cap enforcement, then publish the HTML.
 execFileSync('node', ['scripts/prune-replays.js'], { cwd: DEPLOY_DIR, stdio: 'inherit' });
 fs.copyFileSync(path.join(DEPLOY_DIR, 'my-replays.html'), path.join(DEPLOY_DIR, 'index.html'));
@@ -218,6 +251,6 @@ for (const repo of [WC3V_DIR, DEPLOY_DIR]) {
   }
 }
 
-notify('WC3 Replay Published', `Dazootz vs ${opponent} (${mapDisplay}) is live on the site.`);
+notify('WC3 Replay Published', `Dazootz vs ${opponent} (${mapDisplay}) is live on the site.` + (review.warnings.length ? ` Check-up notes: ${review.warnings.join('; ')}. Screenshots: ~/wc3-review/${finalName}` : ''));
 
 })().catch((e) => fail(`Unexpected error: ${e.message}`));
