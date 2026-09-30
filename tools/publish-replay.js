@@ -76,6 +76,17 @@ try {
 const parsedGzPath = path.join(WC3V_DIR, 'client', 'replays', tempName + '.wc3v.gz');
 const parsed = JSON.parse(zlib.gunzipSync(fs.readFileSync(parsedGzPath)));
 const meta = parsed.replay.metadata;
+
+// Games shorter than a minute (instant leaves, dropped lobbies) are never
+// published. Exit 0 so the watcher doesn't treat it as a failure and retry.
+const MIN_GAME_MS = Number(process.env.WC3_MIN_GAME_MS) || 60 * 1000;
+const lengthMs = parsed.replay.subheader && parsed.replay.subheader.replayLengthMS;
+if (lengthMs != null && lengthMs < MIN_GAME_MS) {
+  fs.unlinkSync(rawDest);
+  fs.unlinkSync(parsedGzPath);
+  notify('WC3 Replay Publish', `Skipped ${path.basename(input)}: game lasted only ${Math.round(lengthMs / 1000)}s (under 1 minute).`);
+  process.exit(0);
+}
 const mapFolder = meta.map.mapName.split('/').pop().replace(/\.w3x$/i, '').replace(/^\(\d+\)/, '');
 
 let names = [];
