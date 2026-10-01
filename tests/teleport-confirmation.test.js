@@ -23,6 +23,8 @@ logManager.setTestMode();
 logManager.setLogger('teleport-confirmation-test');
 
 const { doParsing } = require('../wc3v');
+const { requireFixtures } = require('./fixture-check');
+requireFixtures('1342775468_Kaho_Happy_Hammerfall');
 
 function replayPath (name) {
   return path.join(__dirname, '..', 'replays', `${name}.w3g`);

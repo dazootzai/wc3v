@@ -7,6 +7,8 @@ logManager.setTestMode();
 logManager.setLogger('flo-replay-test');
 
 const { doParsing } = require('../wc3v');
+const { requireFixtures } = require('./fixture-check');
+requireFixtures('happy-vs-kaho-turtle-rock');
 
 const FLO_REPLAY_PATH = path.join(__dirname, '..', 'replays', 'happy-vs-kaho-turtle-rock.w3g');
 

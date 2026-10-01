@@ -25,6 +25,8 @@ logManager.setTestMode();
 logManager.setLogger('item-tracking-test');
 
 const { doParsing } = require('../wc3v');
+const { requireFixtures } = require('./fixture-check');
+requireFixtures('1342775468_Kaho_Happy_Hammerfall', '1908149276_Jens_HawK_Hammerfall', '1711969456_Jens_Iceorc_Springtime13');
 
 function replayPath (name) {
   return path.join(__dirname, '..', 'replays', `${name}.w3g`);

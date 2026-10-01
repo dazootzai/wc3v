@@ -113,6 +113,8 @@ logManager.setTestMode();
 logManager.setLogger('item-tracking-comprehensive');
 
 const { doParsing } = require('../wc3v');
+const { requireFixtures } = require('./fixture-check');
+requireFixtures('1342775468_Kaho_Happy_Hammerfall');
 const mappings = require('../helpers/mappings');
 const teleport = require('../helpers/teleportAbilities');
 const dropTables = require('../helpers/dropTables.json');

@@ -22,6 +22,10 @@ client/data/summaries/old/
 replays/*.w3g
 replays/*.wc3v
 replays/*.wc3v.gz
+# ...except the canonical test fixture. It was ignored along with everything
+# else, got cleaned up, and left 5 test suites unrunnable for weeks —
+# discovered 2026-10-01. Test fixtures are not disposable replays.
+!replays/happy-vs-grubby.w3g
 
 # Import folder (keep example, ignore actual imports)
 replays/import/*.w3g
