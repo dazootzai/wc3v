@@ -10,7 +10,7 @@
 */
 const fs = require('fs');
 const zlib = require('zlib');
-const https = require('https');
+const http = require('http');
 const MAP_DISPLAY_NAMES = require('./map-display-names');
 const { recorderResult } = require('./recorder-result');
 
@@ -145,19 +145,29 @@ function fmtMin (sec) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+// Summaries route through the local GLM bridge (glm-bridge, localhost:8787)
+// rather than api.anthropic.com — Charles's call, 2026-10-01: no Anthropic
+// API usage. The bridge translates the claude-* model name to glm-5.3-flash
+// and injects the real upstream key itself, so the key argument is only a
+// formality kept for the existing call signature.
 function callClaude (apiKey, prompt) {
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 160,
+    // Was 160 — enough for haiku's text-only reply, but glm-5.3-flash thinks
+    // before answering and burned the whole budget on the thinking block,
+    // leaving nothing for the text (backfill failed with "no text block").
+    max_tokens: 2000,
     messages: [{ role: 'user', content: prompt }],
   });
   return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'api.anthropic.com',
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 8787,
       path: '/v1/messages',
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
+        'authorization': 'Bearer ' + apiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(body),
@@ -169,7 +179,12 @@ function callClaude (apiKey, prompt) {
         try {
           const parsed = JSON.parse(data);
           if (parsed.error) return reject(new Error(parsed.error.message));
-          resolve(parsed.content[0].text.trim());
+          // content is a block array; glm-5.3-flash (and any model with
+          // thinking enabled) puts a thinking block first — take the first
+          // text block, not blindly index 0.
+          const textBlock = (parsed.content || []).find(b => b && b.type === 'text');
+          if (!textBlock || !textBlock.text) return reject(new Error('no text block in response: ' + data.slice(0, 300)));
+          resolve(textBlock.text.trim());
         } catch (e) { reject(e); }
       });
     });
