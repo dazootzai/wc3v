@@ -183,7 +183,12 @@ const htmlPath = path.join(DEPLOY_DIR, 'replays-data.js');
 let html = fs.readFileSync(htmlPath, 'utf8');
 const summaryField = summary ? `, summary: '${summary.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '';
 const raceFields = facts ? `, dazRace: '${facts.dazootzRace}', oppRace: '${facts.opponentRace}', winner: '${facts.winner || ''}'` : '';
-const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${raceFields}${summaryField} },\n`;
+// Duration = the last leave event's game time (the game's real length; a
+// game can also end on a disco, which leaveEvents still records).
+const leaves = (parsedForFacts.replay && parsedForFacts.replay.leaveEvents) || [];
+const durationMs = leaves.length ? Math.max(...leaves.map((e) => e.gameTimeMs || 0)) : null;
+const durationField = durationMs ? `, durationMs: ${durationMs}` : '';
+const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${durationField}${raceFields}${summaryField} },\n`;
 html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
 fs.writeFileSync(htmlPath, html);
 
