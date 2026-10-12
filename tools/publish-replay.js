@@ -60,11 +60,20 @@ if (!stampMatch) fail(`Filename doesn't carry a watcher timestamp: ${path.basena
 const [, yyyy, mm, dd, HH, MM] = stampMatch;
 const tempName = `publish-tmp-${yyyy}${mm}${dd}${HH}${MM}`;
 
-// 1. Parse.
-const rawDest = path.join(WC3V_DIR, 'replays', tempName + '.w3g');
+// 1. Parse with the CURRENT engine from the deploy repo -- this repo's own
+// engine is an upstream snapshot and goes stale as fixes land in wc3v-deploy
+// (2026-10-12: publishes had silently lost click capture and every engine fix
+// after it). Pull the deploy repo first so each publish uses the latest; a
+// failed pull (diverged, offline, mid-other-work) falls back to the local copy.
+const rawDest = path.join(DEPLOY_DIR, 'replays', tempName + '.w3g');
 fs.copyFileSync(input, rawDest);
 try {
-  execFileSync('node', ['wc3v.js', `--replay=${tempName}`], { cwd: WC3V_DIR, stdio: 'pipe' });
+  execFileSync('git', ['pull', '--ff-only'], { cwd: DEPLOY_DIR, stdio: 'pipe' });
+} catch (e) {
+  console.log(`Deploy-repo pull failed, parsing with the local engine copy: ${e.message.split('\n')[0]}`);
+}
+try {
+  execFileSync('node', ['engine/wc3v.js', `--replay=${tempName}`], { cwd: DEPLOY_DIR, stdio: 'pipe' });
 } catch (e) {
   fs.unlinkSync(rawDest);
   fail(`Parse failed: ${e.message.split('\n')[0]}`);
@@ -73,7 +82,7 @@ try {
 // 2. Extract map + opponent from the parsed output (same fallback chain
 // used manually earlier -- meta.players is the Reforged shape, playerRecords
 // the classic one; neither is guaranteed).
-const parsedGzPath = path.join(WC3V_DIR, 'client', 'replays', tempName + '.wc3v.gz');
+const parsedGzPath = path.join(DEPLOY_DIR, 'engine', 'client', 'replays', tempName + '.wc3v.gz');
 const parsed = JSON.parse(zlib.gunzipSync(fs.readFileSync(parsedGzPath)));
 const meta = parsed.replay.metadata;
 
@@ -134,11 +143,18 @@ if (dryRun) {
   process.exit(0);
 }
 
-// 4. Rename into place in the wc3v fork (canonical source copies).
-const finalRaw = path.join(WC3V_DIR, 'replays', finalName + '.w3g');
-const finalParsedGz = path.join(WC3V_DIR, 'client', 'replays', finalName + '.wc3v.gz');
+// 4. Rename into place in the deploy repo (where the parse ran), and mirror
+// the canonical source copies into this repo's replays/ for the archive.
+const finalRaw = path.join(DEPLOY_DIR, 'replays', finalName + '.w3g');
+const finalParsedGz = path.join(DEPLOY_DIR, 'engine', 'client', 'replays', finalName + '.wc3v.gz');
 fs.renameSync(rawDest, finalRaw);
 fs.renameSync(parsedGzPath, finalParsedGz);
+try {
+  fs.copyFileSync(finalRaw, path.join(WC3V_DIR, 'replays', finalName + '.w3g'));
+  fs.copyFileSync(finalParsedGz, path.join(WC3V_DIR, 'client', 'replays', finalName + '.wc3v.gz'));
+} catch (e) {
+  console.log(`Fork-archive mirror skipped: ${e.message}`);
+}
 let wc3vBuf = zlib.gunzipSync(fs.readFileSync(finalParsedGz));
 // Make the stored winner match Dazootz's own result (see recorder-result.js), so
 // the viewer's match summary agrees with the badge on the list.
@@ -152,8 +168,7 @@ let wc3vBuf = zlib.gunzipSync(fs.readFileSync(finalParsedGz));
   if (me && them && applyRecorderWinner(d, me.id, them.id)) wc3vBuf = Buffer.from(JSON.stringify(d));
 }
 
-// 5. Copy both formats into the deploy repo.
-fs.copyFileSync(finalRaw, path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'));
+// 5. Write the viewer format into the deploy repo (the raw .w3g is already there).
 fs.writeFileSync(path.join(DEPLOY_DIR, 'replays', finalName + '.wc3v'), wc3vBuf);
 
 // 6. Also rename the live capture in the actual WC3 Replays folder, same as
