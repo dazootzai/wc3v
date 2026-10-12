@@ -211,9 +211,12 @@ fs.writeFileSync(htmlPath, html);
 execFileSync('node', ['scripts/prune-replays.js'], { cwd: DEPLOY_DIR, stdio: 'inherit' });
 fs.copyFileSync(path.join(DEPLOY_DIR, 'my-replays.html'), path.join(DEPLOY_DIR, 'index.html'));
 
-// 10. Deploy.
+// 10. Deploy -- through the repo's deploy wrapper, which regenerates the
+// content-derived cache busters (root hash block + MODEL_ASSET_VERSION) so
+// a deploy can never ship stale asset versions.
 const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/CLOUDFLARE_API_TOKEN=(.+)/)[1].trim();
 try {
+  execFileSync('node', ['engine/tools/gen-root-asset-manifest.js'], { cwd: DEPLOY_DIR, stdio: 'pipe' });
   execFileSync('npx', ['--yes', 'wrangler', 'deploy'], {
     cwd: DEPLOY_DIR,
     env: { ...process.env, CLOUDFLARE_API_TOKEN: token },
