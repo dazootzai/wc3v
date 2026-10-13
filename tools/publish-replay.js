@@ -37,12 +37,14 @@ const { generateSummary, extractFacts } = require('./generate-summary');
 const { applyRecorderWinner } = require('./recorder-result');
 
 function notify (title, body) {
-  try { execFileSync('notify-send', [title, body]); } catch (e) { /* best-effort */ }
+  // Desktop popups removed (2026-10-13): they fired mid-game on the Deck.
+  // Success is visible on the site; failures land in the watcher log at
+  // ~/.local/state/wc3-replay-publish.log.
   console.log(`${title}: ${body}`);
 }
 
 function fail (msg) {
-  notify('WC3 Replay Publish', msg);
+  console.log(`WC3 Replay Publish FAILURE: ${msg}`);
   process.exit(1);
 }
 
