@@ -279,7 +279,213 @@ Summary:`;
   return callClaude(apiKey, prompt);
 }
 
-module.exports = { generateSummary, extractFacts };
+// Team-game (2v2+) variant of extractFacts: Dazootz's side vs the other
+// side, every player named. Same recorder-based winner rule -- in a team
+// game the recorder's result IS the team's result. Dominance is Dazootz's
+// share of a 100-point pool split across ALL players, so "even" is
+// 100/playerCount (25 in a 2v2), not 50 -- DominanceSeries normalizes
+// across every player, and the summary prompt must say so or every 2v2
+// reads as "one-sided".
+function extractTeamFacts (data) {
+  const meta = data.replay.metadata;
+  const mapFolder = meta.map.mapName.split('/').pop().replace(/\.w3x$/i, '').replace(/^\(\d+\)/, '');
+  const mapName = MAP_DISPLAY_NAMES[mapFolder] || mapFolder;
+
+  const named = Object.entries(data.replay.players || {})
+    .filter(([, p]) => p.name && !/neutral|blizzard/i.test(p.name))
+    .map(([id, p]) => ({ id: +id, name: p.name.split('#')[0], teamId: +p.teamId }));
+  const daz = named.find((p) => p.name.toLowerCase() === 'dazootz');
+  if (!daz) return null;
+  const team = [daz].concat(named.filter((p) => p !== daz && p.teamId === daz.teamId));
+  const opponents = named.filter((p) => p.teamId !== daz.teamId);
+  if (!team.length || !opponents.length) return null;
+
+  const raceOf = (p) => {
+    const wc3v = data.players[String(p.id)] || {};
+    return RACE_NAMES[wc3v.race] || wc3v.race || 'unknown race';
+  };
+
+  const durationMs = (data.replay.subheader && data.replay.subheader.replayLengthMS)
+    || (data.replay.parseTruncated && data.replay.parseTruncated.lastActionGameTimeMs) || null;
+
+  let winner = null; // 'dazootz' (Dazootz's side) | 'opponent' | null
+  let winnerAssumed = false;
+  const rec = recorderResult(data);
+  if (rec) {
+    winner = rec === 'win' ? 'dazootz' : 'opponent';
+  } else if (data.winner && data.winner.playerId != null) {
+    const wId = data.winner.playerId;
+    const wTeam = data.winner.teamId != null ? +data.winner.teamId : (named.find((p) => p.id === +wId) || {}).teamId;
+    winner = wTeam === daz.teamId ? 'dazootz' : 'opponent';
+  } else if (!(data.replay.leaveEvents || []).length) {
+    // Same rule as 1v1 (Dazootz's own call, 2026-09-28): zero leave data at
+    // all means he quit out early, which he only does on losses.
+    winner = 'opponent';
+    winnerAssumed = true;
+  }
+
+  const tierTime = (stream, tier) => {
+    const e = (stream || []).find((t) => t.tier === tier);
+    return e ? Math.round(e.gameTime / 1000) : null;
+  };
+
+  const dazPlayer = data.players[String(daz.id)] || {};
+  const samples = (dazPlayer.dominanceSeries && dazPlayer.dominanceSeries.samples) || [];
+  const scoreAt = (t) => {
+    if (!samples.length) return null;
+    let nearest = samples[0];
+    for (const s of samples) { if (s.t <= t) nearest = s; else break; }
+    return nearest.score;
+  };
+  const trend = [0, 0.25, 0.5, 0.75, 1].map((frac) => {
+    if (!durationMs) return null;
+    return Math.round(scoreAt(durationMs * frac));
+  });
+
+  // The same battleId appears under every participant; whichever side holds
+  // an initiator role on it started the fight.
+  const roleIn = (p, battleId) => {
+    const part = ((data.players[String(p.id)] || {}).battleParticipation || []).find((x) => x.battleId === battleId);
+    return part ? part.role : null;
+  };
+  const battles = (dazPlayer.battleParticipation || []).map((b) => {
+    const before = scoreAt(b.startTime - 1);
+    const after = scoreAt(b.endTime + 1);
+    const initiator = team.some((p) => roleIn(p, b.battleId) === 'initiator') ? 'team'
+      : (opponents.some((p) => roleIn(p, b.battleId) === 'initiator') ? 'opponents' : null);
+    return {
+      timeSec: Math.round(b.startTime / 1000),
+      category: b.category,
+      initiator,
+      dominanceSwingTowardDazootz: (before != null && after != null) ? Math.round((after - before) * 10) / 10 : null,
+    };
+  });
+
+  const foodUtilization = (series) => {
+    const usable = (series || []).filter((s) => s.foodMax > 0);
+    if (!usable.length) return null;
+    return Math.round(usable.reduce((sum, s) => sum + s.foodUsed / s.foodMax, 0) / usable.length * 100);
+  };
+  const macroFor = (p) => {
+    const wc3v = data.players[String(p.id)] || {};
+    const series = wc3v.resourceSeries || [];
+    const last = series.length ? series[series.length - 1] : {};
+    return {
+      name: p.name,
+      race: raceOf(p),
+      apm: wc3v.apmData ? wc3v.apmData.effective.average : null,
+      foodUtilizationPct: foodUtilization(series),
+      goldSpent: last.goldSpent ?? null,
+      lumberSpent: last.lumberSpent ?? null,
+      goldLost: last.goldLost ?? null,
+    };
+  };
+
+  return {
+    map: mapName,
+    gameMode: data.gameMode || `${team.length}v${opponents.length}`,
+    team: team.map(macroFor),
+    opponents: opponents.map(macroFor),
+    durationSec: durationMs ? Math.round(durationMs / 1000) : null,
+    dazootzApm: dazPlayer.apmData ? dazPlayer.apmData.effective.average : null,
+    dazootzTier2Sec: tierTime(dazPlayer.tierStream, 2),
+    dazootzTier3Sec: tierTime(dazPlayer.tierStream, 3),
+    winner,
+    winnerAssumed,
+    winnerConfidence: winnerAssumed ? 'assumed' : (rec ? 'high' : (data.winner ? data.winner.confidence : null)),
+    evenShare: Math.round(100 / named.length),
+    dominanceTrend: trend,
+    battles,
+  };
+}
+
+async function generateTeamSummary (data, apiKey) {
+  apiKey = apiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY (set it in env or pass one in)');
+
+  const facts = extractTeamFacts(data);
+  if (!facts) throw new Error('Could not split this replay into two teams around Dazootz');
+
+  const even = facts.evenShare;
+  const trendLabels = ['start', '25%', 'mid', '75%', 'end'];
+  const trendLine = facts.dominanceTrend.some((v) => v != null)
+    ? `Dominance trend (Dazootz's share of a 100-point pool split across all ${facts.team.length + facts.opponents.length} players, ${even} = even, higher = ahead): ${facts.dominanceTrend.map((v, i) => `${trendLabels[i]} ${v == null ? '?' : v}`).join(', ')}`
+    : null;
+
+  const closenessLine = (() => {
+    const pts = facts.dominanceTrend;
+    const known = pts.map((v, i) => ({ v, i })).filter((p) => p.v != null);
+    if (known.length < 2) return null;
+    const maxDev = known.reduce((m, p) => Math.max(m, Math.abs(p.v - even)), 0);
+    const peak = known.reduce((a, b) => (Math.abs(b.v - even) > Math.abs(a.v - even) ? b : a));
+    const timing = peak.i <= 1 ? 'early' : peak.i >= 3 ? 'late' : 'mid-game';
+    const towardWho = peak.v > even ? "Dazootz's side" : 'the enemy side';
+    let label;
+    if (maxDev <= 8) label = 'close the entire game, never far from even';
+    else if (maxDev <= 18) label = `somewhat one-sided -- ${towardWho} built a real lead ${timing}`;
+    else label = `one-sided -- ${towardWho} was clearly ahead ${timing}`;
+    return `Closeness (computed from the trend above, use this framing directly): ${label}.`;
+  })();
+
+  const fmtPlayer = (p) => `${p.name} (${p.race}${p.apm != null ? `, ${p.apm} effective APM` : ''})`;
+  const rosterLine = `Teams: ${facts.team.map(fmtPlayer).join(' & ')} vs ${facts.opponents.map(fmtPlayer).join(' & ')}`;
+
+  const battleLines = facts.battles.length
+    ? facts.battles.map((b) => {
+        const who = b.initiator === 'team' ? "Dazootz's side initiated" : b.initiator === 'opponents' ? 'the enemy side initiated' : 'initiator unclear';
+        const swing = b.dominanceSwingTowardDazootz == null ? '' :
+          b.dominanceSwingTowardDazootz > 0 ? `, swung ${b.dominanceSwingTowardDazootz} points toward Dazootz's side`
+          : b.dominanceSwingTowardDazootz < 0 ? `, swung ${Math.abs(b.dominanceSwingTowardDazootz)} points toward the enemy side`
+          : ', no measurable dominance swing';
+        return `  - ${fmtMin(b.timeSec)} ${b.category}, ${who}${swing}`;
+      }).join('\n')
+    : null;
+
+  const macroLines = facts.team.concat(facts.opponents).map((p) => {
+    const label = p.name === 'Dazootz' ? 'Dazootz' : p.name;
+    return `${label}: ${p.foodUtilizationPct != null ? `${p.foodUtilizationPct}% avg supply utilization` : 'supply data unavailable'}, ${p.goldSpent ?? '?'} gold / ${p.lumberSpent ?? '?'} lumber spent, ${p.goldLost ?? '?'} gold lost in fights.`;
+  }).join(' ');
+
+  const lines = [
+    `Map: ${facts.map}`,
+    `Game mode: ${facts.gameMode}`,
+    rosterLine,
+    `Dazootz: ${facts.dazootzApm != null ? `${facts.dazootzApm} effective APM` : 'APM unavailable'}${facts.dazootzTier2Sec != null ? `, hit Tier 2 at ${fmtMin(facts.dazootzTier2Sec)}` : ''}${facts.dazootzTier3Sec != null ? `, Tier 3 at ${fmtMin(facts.dazootzTier3Sec)}` : ''}`,
+    facts.durationSec != null ? `Game length: ${fmtMin(facts.durationSec)}` : null,
+    facts.winnerAssumed
+      ? `Winner: the enemy side won (assumed -- no leave data was captured at all, and Dazootz quits out early on losses, never on wins, so this is treated as a loss)`
+      : facts.winner
+        ? `Winner: ${facts.winner === 'dazootz' ? "Dazootz's side" : 'the enemy side'} (${facts.winnerConfidence} confidence, inferred from leave records)`
+        : 'Winner: not determinable from this replay (leave records inconclusive) -- do not guess or imply one',
+    trendLine,
+    closenessLine,
+    battleLines ? `Battles:\n${battleLines}` : 'Battles: none detected',
+    `Macro at game end: ${macroLines}`,
+  ].filter(Boolean).join('\n');
+
+  const prompt = `Write a very short, plain, factual 2-sentence summary of this Warcraft III team-game (2v2) replay. The replay card already shows the map, all four players with their races, and which side won right above this text -- do NOT restate any of that (no map name, no race names, no "Dazootz's side won/lost"). Use the freed-up space to say something actually useful instead.
+
+Style example (length and plainness only, not content -- every game is different, don't reuse this wording):
+
+"The game stayed close until the enemy side took over with back-to-back fights in the middle, and Dazootz's side never recovered the lead. Dazootz's fights kept costing more than they gained -- checking that an attack can actually be won before starting it is the habit to build."
+
+Rules:
+- Sentence 1: how the game actually went and what the single biggest turning point was -- ground this in the "Closeness" line below (close vs. one-sided, and when/toward which side the lead formed) but describe it as an event, not a restated number. Never default to "close throughout" unless the Closeness line actually says close.
+- Sentence 2: the real deciding factor (macro, army size, fight decisions, teamwork with the teammate, tech timing, map control) grounded in the facts below, ending with one concrete, general thing for Dazootz to improve -- a skill he can carry into ANY future game, not specific to these opponents.
+- Third-grade-reading-level plain words. No stats, no numbers, no times, no jargon, no hype. You may name a player once if it reads naturally.
+- Never imply a rematch or rivalry -- every opponent is a one-off random matchup.
+- If the winner is marked "not determinable", don't state or imply who won -- describe the trajectory and the improvement point regardless.
+
+Use only the facts below -- don't invent anything beyond them.
+
+${lines}
+
+Summary:`;
+
+  return callClaude(apiKey, prompt);
+}
+
+module.exports = { generateSummary, extractFacts, generateTeamSummary, extractTeamFacts };
 
 if (require.main === module) {
   const input = process.argv[2];

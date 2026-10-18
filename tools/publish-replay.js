@@ -33,7 +33,7 @@ const TOKEN_ENV = path.join(process.env.HOME, '.config', 'wc3-replays', 'deploy.
 process.env.PATH = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
 
 const MAP_DISPLAY_NAMES = require('./map-display-names');
-const { generateSummary, extractFacts } = require('./generate-summary');
+const { generateSummary, extractFacts, generateTeamSummary, extractTeamFacts } = require('./generate-summary');
 const { applyRecorderWinner } = require('./recorder-result');
 
 function notify (title, body) {
@@ -46,6 +46,14 @@ function notify (title, body) {
 function fail (msg) {
   console.log(`WC3 Replay Publish FAILURE: ${msg}`);
   process.exit(1);
+}
+
+// Team entry rosters: [{ name, race }, ...] -> the source literal for the
+// TEAM_REPLAYS line (empty array when no facts could be extracted).
+function formatRoster (facts, side) {
+  const list = (facts && facts[side]) || [];
+  const esc = (v) => String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  return `[${list.map((p) => `{ name: '${esc(p.name)}', race: '${esc(p.race)}' }`).join(', ')}]`;
 }
 
 (async () => {
@@ -119,6 +127,25 @@ if (!opponent) {
   fail(`Couldn't find an opponent name in ${path.basename(input)} (parsed but names were empty/unrecognized -- check manually)`);
 }
 
+// Team-game split (2v2+): replay.players carries each player's name and
+// teamId, so Dazootz's side and the enemy side fall straight out of it. In
+// a team game the first non-Dazootz name can be his TEAMMATE, so anything
+// opponent-shaped must come from this split, never from `opponent` above.
+const teammates = [];
+const opponents = [];
+{
+  const norm = (n) => (n || '').split('#')[0].toLowerCase();
+  const rp = parsed.replay.players || {};
+  const dazEntry = Object.entries(rp).find(([, p]) => norm(p.name) === 'dazootz');
+  const dazTeam = dazEntry ? +dazEntry[1].teamId : null;
+  for (const [id, p] of Object.entries(rp)) {
+    if (!p.name || /neutral|blizzard/i.test(p.name) || norm(p.name) === 'dazootz') continue;
+    const player = { id: +id, name: p.name.split('#')[0], teamId: +p.teamId };
+    (dazTeam != null && player.teamId === dazTeam ? teammates : opponents).push(player);
+  }
+}
+const isTeam = opponents.length > 1;
+
 const mapDisplay = MAP_DISPLAY_NAMES[mapFolder];
 const mapDirExists = fs.existsSync(path.join(DEPLOY_DIR, 'maps', mapFolder));
 if (!mapDisplay || !mapDirExists) {
@@ -127,8 +154,11 @@ if (!mapDisplay || !mapDirExists) {
   fail(`Unknown map "${mapFolder}" -- extract and convert it manually first (README.md), add it to MAP_DISPLAY_NAMES, then rerun on this .w3g`);
 }
 
-// 3. Compute the final name and check idempotency.
-const opponentSlug = opponent.toLowerCase().replace(/[^a-z0-9]+/g, '');
+// 3. Compute the final name and check idempotency. Team games list the
+// opposing players only (teammates stay out of the filename): the star API
+// caps the slug at 60 chars and a 2v2 with both sides doesn't always fit.
+const slugify = (n) => n.toLowerCase().replace(/[^a-z0-9]+/g, '');
+const opponentSlug = isTeam ? opponents.map((o) => slugify(o.name)).join('-') : slugify(opponent);
 const finalName = `${yyyy}-${mm}-${dd}_${HH}${MM}_dazootz-vs-${opponentSlug}`;
 if (fs.existsSync(path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'))) {
   fs.unlinkSync(rawDest);
@@ -139,7 +169,9 @@ if (fs.existsSync(path.join(DEPLOY_DIR, 'replays', finalName + '.w3g'))) {
 
 if (dryRun) {
   console.log(`Would publish as: ${finalName}`);
-  console.log(`  map: ${mapDisplay}  opponent: ${opponent}`);
+  console.log(`  map: ${mapDisplay}  ${isTeam
+    ? `team: ${['Dazootz'].concat(teammates.map((t) => t.name)).join(' & ')} vs ${opponents.map((o) => o.name).join(' & ')}`
+    : `opponent: ${opponent}`}`);
   fs.unlinkSync(rawDest);
   fs.unlinkSync(parsedGzPath);
   process.exit(0);
@@ -167,7 +199,16 @@ let wc3vBuf = zlib.gunzipSync(fs.readFileSync(finalParsedGz));
   const all = ids.concat(recs).filter((x) => x.n && !/neutral|blizzard/.test(x.n));
   const me = all.find((x) => x.n === 'dazootz');
   const them = all.find((x) => x.n !== 'dazootz');
-  if (me && them && applyRecorderWinner(d, me.id, them.id)) wc3vBuf = Buffer.from(JSON.stringify(d));
+  if (me && them && applyRecorderWinner(d, me.id, them.id)) {
+    // Team game: name the whole winning side, not just its first member.
+    if (isTeam && d.winner && d.winner.teamId != null) {
+      const winners = Object.entries(d.replay.players || {})
+        .filter(([, p]) => p.name && !/neutral|blizzard/i.test(p.name) && +p.teamId === +d.winner.teamId)
+        .map(([id]) => +id);
+      if (winners.length) d.winner.playerIds = winners;
+    }
+    wc3vBuf = Buffer.from(JSON.stringify(d));
+  }
 }
 
 // 5. Write the viewer format into the deploy repo (the raw .w3g is already there).
@@ -184,10 +225,10 @@ try { fs.renameSync(input, path.join(path.dirname(input), finalName + '.w3g')); 
 // card publishes without one, not that the whole game fails to go live.
 let summary = null;
 const parsedForFacts = JSON.parse(wc3vBuf);
-const facts = extractFacts(parsedForFacts);
+const facts = isTeam ? extractTeamFacts(parsedForFacts) : extractFacts(parsedForFacts);
 try {
   const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/ANTHROPIC_API_KEY=(.+)/);
-  if (token) summary = await generateSummary(parsedForFacts, token[1].trim());
+  if (token) summary = await (isTeam ? generateTeamSummary : generateSummary)(parsedForFacts, token[1].trim());
 } catch (e) {
   console.log(`Summary generation failed (publishing without one): ${e.message}`);
 }
@@ -205,8 +246,20 @@ const raceFields = facts ? `, dazRace: '${facts.dazootzRace}', oppRace: '${facts
 const leaves = (parsedForFacts.replay && parsedForFacts.replay.leaveEvents) || [];
 const durationMs = leaves.length ? Math.max(...leaves.map((e) => e.gameTimeMs || 0)) : null;
 const durationField = durationMs ? `, durationMs: ${durationMs}` : '';
-const entryLine = `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${durationField}${raceFields}${summaryField} },\n`;
-html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
+const entryLine = isTeam
+  ? `      { file: '${finalName}', map: '${mapDisplay}', day: '${day}', timeLabel: '${timeLabel}'${durationField}, gameMode: '${parsed.gameMode || '2v2'}', team: ${formatRoster(facts, 'team')}, opponents: ${formatRoster(facts, 'opponents')}, winner: '${facts ? (facts.winner || '') : ''}'${summaryField} },\n`
+  : `      { file: '${finalName}', map: '${mapDisplay}', opponent: '${opponent}', day: '${day}', timeLabel: '${timeLabel}'${durationField}${raceFields}${summaryField} },\n`;
+if (isTeam) {
+  // Team games live in their own array so the 1v1 tooling (prune, backfill,
+  // the 1v1 publish insert) never has to understand them.
+  if (!/var TEAM_REPLAYS = \[\n/.test(html)) {
+    html += `\n// Team games (2v2+), newest first. Written by publish-replay.js's team path;\n// same line format as REPLAYS, but roster fields instead of a single opponent.\nvar TEAM_REPLAYS = [\n${entryLine}];\n`;
+  } else {
+    html = html.replace(/(var TEAM_REPLAYS = \[\n)/, `$1${entryLine}`);
+  }
+} else {
+  html = html.replace(/(var REPLAYS = \[\n)/, `$1${entryLine}`);
+}
 fs.writeFileSync(htmlPath, html);
 
 // 9. Cap enforcement, then publish the HTML.
@@ -215,17 +268,22 @@ fs.copyFileSync(path.join(DEPLOY_DIR, 'my-replays.html'), path.join(DEPLOY_DIR, 
 
 // 10. Deploy -- through the repo's deploy wrapper, which regenerates the
 // content-derived cache busters (root hash block + MODEL_ASSET_VERSION) so
-// a deploy can never ship stale asset versions.
-const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/CLOUDFLARE_API_TOKEN=(.+)/)[1].trim();
-try {
-  execFileSync('node', ['engine/tools/gen-root-asset-manifest.js'], { cwd: DEPLOY_DIR, stdio: 'pipe' });
-  execFileSync('npx', ['--yes', 'wrangler', 'deploy'], {
-    cwd: DEPLOY_DIR,
-    env: { ...process.env, CLOUDFLARE_API_TOKEN: token },
-    stdio: 'pipe',
-  });
-} catch (e) {
-  fail(`Deploy failed for ${finalName}: ${e.message.split('\n')[0]} (files are in place locally -- retry with: cd ${DEPLOY_DIR} && npx wrangler deploy)`);
+// a deploy can never ship stale asset versions. WC3_SKIP_DEPLOY=1 stages
+// everything locally only (multi-game staging, dry runs).
+if (process.env.WC3_SKIP_DEPLOY) {
+  console.log('WC3_SKIP_DEPLOY is set -- skipping deploy.');
+} else {
+  const token = fs.readFileSync(TOKEN_ENV, 'utf8').match(/CLOUDFLARE_API_TOKEN=(.+)/)[1].trim();
+  try {
+    execFileSync('node', ['engine/tools/gen-root-asset-manifest.js'], { cwd: DEPLOY_DIR, stdio: 'pipe' });
+    execFileSync('npx', ['--yes', 'wrangler', 'deploy'], {
+      cwd: DEPLOY_DIR,
+      env: { ...process.env, CLOUDFLARE_API_TOKEN: token },
+      stdio: 'pipe',
+    });
+  } catch (e) {
+    fail(`Deploy failed for ${finalName}: ${e.message.split('\n')[0]} (files are in place locally -- retry with: cd ${DEPLOY_DIR} && npx wrangler deploy)`);
+  }
 }
 
 // 11. Commit + push both repos so the Deck and any other device stay in sync.
@@ -243,6 +301,9 @@ for (const repo of [WC3V_DIR, DEPLOY_DIR]) {
   }
 }
 
-notify('WC3 Replay Published', `Dazootz vs ${opponent} (${mapDisplay}) is live on the site.`);
+const matchup = isTeam
+  ? `Dazootz & ${teammates.map((t) => t.name).join(' & ')} vs ${opponents.map((o) => o.name).join(' & ')}`
+  : `Dazootz vs ${opponent}`;
+notify('WC3 Replay Published', `${matchup} (${mapDisplay}) is live on the site.`);
 
 })().catch((e) => fail(`Unexpected error: ${e.message}`));

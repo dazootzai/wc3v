@@ -6,9 +6,11 @@ module.exports = {
   'AutumnLeaves_S2_v2.0': 'Autumn Leaves',
   'ConcealedHill_S2': 'Concealed Hill',
   'EchoIsles_S2_v2.2': 'Echo Isles',
+  'GnollWood': 'Gnoll Wood',
   'Hammerfall_S3': 'Hammerfall',
   'LastRefuge_S2_v1.5': 'Last Refuge',
   'NorthernIsles_S2': 'Northern Isles',
   'TerenasStand_LV': 'Terenas Stand',
   'Tidehunters_S2_v1.2': 'Tidehunters',
+  'TurtleRock_S2': 'Turtle Rock',
 };
