@@ -1960,7 +1960,11 @@ const getUnitInfo = (itemId) => {
   );
 
 	const isHero = (inHeroList);
-  const isResearch = (inUnitList && units[itemId] && units[itemId].startsWith("Upgrade"));
+  // researchMeta is the authoritative research list: some research ids (rawwrr's
+  // Robk/Berserker Upgrade) have no entry in the units map at all, which made
+  // every press of them isResearch=false — the research was never recorded,
+  // never completed, and any units it morphs stayed in their old form
+  const isResearch = (inUnitList && units[itemId] && units[itemId].startsWith("Upgrade")) || !!researchMeta[itemId];
 	const isUnit = (inUnitList || isHero || isCritter && !isBuilding);
   const isItem = (inItemList);
   
