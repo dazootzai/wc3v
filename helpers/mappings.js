@@ -99,6 +99,7 @@ const abilityActions = {
   'EatTree': [ -78, 0, 13, 0 ],
   'SummonElemental': [ 129, 0, 13, 0 ],
   'SummonTreants': [ 208, 0, 13, 0 ],
+  'SummonLavaSpawn': [ 187, 2, 13, 0 ],
   'DeathCoil': [ 254, 0, 13, 0 ],
   'HarvestLumber': [ 116, 108, 84, 76 ],
   'TeleportScroll': [ 40, 0, 13, 0 ],
@@ -1532,7 +1533,20 @@ const heroAbilities = {
     'ANic': { 'displayName': 'Incinerate'},
     'ANia': { 'displayName': 'Incinerate'},
     'ANso': { 'displayName': 'Soul Burn'},
-    'ANlm': { 'displayName': 'Summon Lava Spawn'},
+    // Summon Lava Spawn — the FireLord's summon. This entry is the
+    // unregistered-unit gap fix (2026-11-08, probe 41 follow-up): without a
+    // type:'summon' entry here, castSummon never fires for the FireLord and
+    // lava spawns are absent from every parse — the 75996-class clicked ids
+    // (wc3-replays movement-drift-probe-41-2026-11-07.md). All values from
+    // the game's own data: heroAbilityStats.json ANlm (count DataA=[1,1,1],
+    // duration=[70,70,70]) and UnitBalance.json (nlv1/nlv2/nlv3 per level).
+    'ANlm': {
+      'displayName': 'Summon Lava Spawn',
+      'type': 'summon',
+      'summonCount': 1,
+      'summonItemId': ['nlv1', 'nlv2', 'nlv3'],
+      'summonDuration': 70
+    },
     'ANvc': { 'displayName': 'Volcano'},
     'ANhs': { 'displayName': 'Healing Spray'},
     'ANab': { 'displayName': 'Acid Bomb'},
