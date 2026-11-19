@@ -1102,7 +1102,11 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
           x: a.x,
           y: a.y,
           status: a.status,
-          cancelledAt: a.cancelledAt
+          cancelledAt: a.cancelledAt,
+          // [owner-cancel lane 2026-11-19] the cancelled site's replay id pair —
+          // the binding oracle needs it to resolve the cancel press
+          cancelledId1: a.cancelledId1,
+          cancelledId2: a.cancelledId2
         })),
         supplyBumps: (_supplyBumps || []).map(b => ({
           gameTime: b.gameTime,
