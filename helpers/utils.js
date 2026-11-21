@@ -1093,94 +1093,57 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
           // construction (destroyUnit only receives live summon objects);
           // export them whether or not a replay id ever bound.
           //
-          // [fight-parity census 2026-11-21] the (itemId, spawnTime,
-          // destroyedAt) dedupe under-counts REAL pairs: a cast's two wolves
-          // that die (or expire) on the same tick collapse to one record
-          // (birdmane osw1 9 vs retail's 7 casts x DataB=2 = 14, each pair
-          // confirmed by the wolf-lifetime measurement), and duration-expiring
-          // summons always share destroyedAt, so lifetime evidence cannot
-          // separate a real pair from a parse twin. The count authority is the
-          // cast event itself: castSummon creates exactly summonCount Unit
-          // records per cast into the eventStream (positions = the caster's
-          // press position — junk positions on destroyedSummons exports for
-          // never-clicked units are backfill garbage). Group by
-          // (itemId, spawnTime) and export exactly the eventStream record
-          // count, copying the eventStream positions per index; destroyedAt
-          // rides on each source record. AUcb is now level-slotted (retail L1
-          // beetles = 1/cast, proven on flaco27), so beetle casts stay at 1
-          // and only the real pairs inflate. A group the eventStream does not
-          // know about keeps the bound/ghost behavior.
+          // [fight-parity census 2026-11-21, SECOND CORRECTION] the
+          // 0d55b01-era export (and this file's first 2026-11-21 correction,
+          // which padded unbound casts to press-inferred counts) both mix
+          // replay FACTS with parser SIMULATION. A destroyedSummons record
+          // for a never-clicked summon is the parser's own model of "if the
+          // cast succeeded": the cast success itself is what the replay
+          // cannot always show (mana gates, cancel-clicks inside the 0.3s
+          // Far Seer cast point, queued casts wiped by the next order). The
+          // birdmane wolves made the failure decisive: press-inferred pairs
+          // existed for all 7 casts, but only casts 1-3 (132.83/238.92/
+          // 412.74) carry replay-id BOUND records — the player selected
+          // exactly those wolves and never any others, and the 648.36 press
+          // provably cancelled (its next click arrived 183ms into a 300ms
+          // cast point). So the scored census now counts BOUND records only
+          // (replay unit evidence); unbound press-inferred records move to
+          // the report-only inferredSummonCount field. Instrument limit,
+          // named: a real summon that fired but was never selected is
+          // invisible to this census on the truth side.
           ...(() => {
-            const castCounts = new Map(); // itemId|spawnTime -> [positions]
-            for (const event of eventStream) {
-              if ((event.key === 'addUnit') && event.unit && event.unit.isSummon
-                  && (event.unit.itemId != null)) {
-                const key = event.unit.itemId + '|' + event.gameTime;
-                if (!castCounts.has(key)) {
-                  castCounts.set(key, []);
-                }
-                castCounts.get(key).push({
-                  x: event.unit.lastPosition ? event.unit.lastPosition.x : null,
-                  y: event.unit.lastPosition ? event.unit.lastPosition.y : null
-                });
-              }
-            }
-            const groups = new Map();
+            const out = [];
+            const seen = new Set();
             for (const unit of (player.destroyedSummons || [])) {
               const exported = unit.exportUnit();
               exported.destroyedAt = unit.destroyedAt;
               exported.isSummon = true;
-              const key = exported.itemId + '|' + exported.spawnTime;
-              if (!groups.has(key)) {
-                groups.set(key, []);
-              }
-              groups.get(key).push(exported);
-            }
-            const out = [];
-            for (const [key, group] of groups) {
-              const castRecs = castCounts.get(key) || null;
-              const bound = [];
-              const seen = new Set();
-              let unboundFallback = null;
-              for (const exported of group) {
-                const fp = exported.uuid + '|' + exported.itemId1 + '|' + exported.objectId1;
-                if (exported.itemId1 != null || exported.objectId1 != null) {
-                  if (!seen.has(fp)) {
-                    seen.add(fp);
-                    bound.push(exported);
-                  }
-                } else {
-                  unboundFallback = exported;
-                }
-              }
-              const representative = bound.length ? bound[0] : unboundFallback;
-              if (!representative) {
+              if ((exported.itemId1 == null) && (exported.objectId1 == null)) {
                 continue;
               }
-              if (castRecs && (castRecs.length > 0)) {
-                // never drop bound evidence when the eventStream undercounts
-                const n = Math.max(castRecs.length, bound.length);
-                for (let i = 0; i < n; i++) {
-                  const rec = (i < bound.length) ? bound[i] : Object.assign({}, representative);
-                  if (i >= bound.length) {
-                    rec.uuid = representative.uuid + '-cast' + i;
-                  }
-                  if (castRecs[i] && (castRecs[i].x != null)) {
-                    rec.lastPosition = { x: castRecs[i].x, y: castRecs[i].y };
-                  }
-                  out.push(rec);
-                }
+              const fp = exported.uuid + '|' + exported.itemId1 + '|' + exported.objectId1;
+              if (seen.has(fp)) {
+                continue;
               }
-              else {
-                out.push(...bound);
-                if (!bound.length && (unboundFallback !== null)) {
-                  out.push(unboundFallback);
-                }
-              }
+              seen.add(fp);
+              out.push(exported);
             }
             return out;
-          })()
-        ),
+          })(),
+          // [fight-parity census 2026-11-21] report-only: press-inferred
+          // summons with no replay-id binding (never selected). Not scored —
+          // the cast behind them may have been mana-blocked or cancelled —
+          // but exported so the instrument limit stays visible in the file.
+          inferredSummonCount: (() => {
+            const uuids = new Set();
+            for (const unit of (player.destroyedSummons || [])) {
+              const exported = unit.exportUnit();
+              if ((exported.itemId1 == null) && (exported.objectId1 == null)) {
+                uuids.add(exported.uuid);
+              }
+            }
+            return uuids.size;
+          })(),
         buildingAttempts: (_buildingAttempts || []).map(a => ({
           itemId: a.itemId,
           displayName: a.displayName,
