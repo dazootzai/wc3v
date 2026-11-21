@@ -1088,41 +1088,57 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
     		units: units.map(unit => unit.exportUnit()).concat(
           // [reconcile-census lane 2026-11-21] unregistered summons (never
           // clicked, so no replay-id binding) were dropped here — the
-          // integral Water Elementals expired by duration, reached
-          // destroyedSummons through destroyUnit, and then vanished from
-          // the census: the reconcile counted truth 0 hwat while retail
-          // summoned two. destroyedSummons entries are real units by
+          // integral Water Elementals expired by duration and vanished from
+          // the census. destroyedSummons entries are real units by
           // construction (destroyUnit only receives live summon objects);
           // export them whether or not a replay id ever bound.
-          // [reconcile-census lane 2026-11-21] unregistered summons (never
-          // clicked, so no replay-id binding) were dropped here — the
-          // integral Water Elementals expired by duration, reached
-          // destroyedSummons through destroyUnit, and then vanished from
-          // the census: the reconcile counted truth 0 hwat while retail
-          // summoned. destroyedSummons entries are real units by
-          // construction; export them whether or not a replay id ever
-          // bound. BUT the summon paths can export MORE than one record per
-          // real unit: verbatim duplicates (the birdmane wolves appear twice
-          // identically) and an unbound ghost twin beside a bound record
-          // (flaco beetles). Group by (itemId, spawnTime, destroyedAt) and
-          // within a group keep the bound records (deduped verbatim) or, if
-          // the group has no bound record at all, a single unbound record —
-          // real simultaneous units of one cast always differ in uuid, so
-          // distinct bound records all survive.
+          //
+          // [fight-parity census 2026-11-21] the (itemId, spawnTime,
+          // destroyedAt) dedupe under-counts REAL pairs: a cast's two wolves
+          // that die (or expire) on the same tick collapse to one record
+          // (birdmane osw1 9 vs retail's 7 casts x DataB=2 = 14, each pair
+          // confirmed by the wolf-lifetime measurement), and duration-expiring
+          // summons always share destroyedAt, so lifetime evidence cannot
+          // separate a real pair from a parse twin. The count authority is the
+          // cast event itself: castSummon creates exactly summonCount Unit
+          // records per cast into the eventStream (positions = the caster's
+          // press position — junk positions on destroyedSummons exports for
+          // never-clicked units are backfill garbage). Group by
+          // (itemId, spawnTime) and export exactly the eventStream record
+          // count, copying the eventStream positions per index; destroyedAt
+          // rides on each source record. AUcb is now level-slotted (retail L1
+          // beetles = 1/cast, proven on flaco27), so beetle casts stay at 1
+          // and only the real pairs inflate. A group the eventStream does not
+          // know about keeps the bound/ghost behavior.
           ...(() => {
+            const castCounts = new Map(); // itemId|spawnTime -> [positions]
+            for (const event of eventStream) {
+              if ((event.key === 'addUnit') && event.unit && event.unit.isSummon
+                  && (event.unit.itemId != null)) {
+                const key = event.unit.itemId + '|' + event.gameTime;
+                if (!castCounts.has(key)) {
+                  castCounts.set(key, []);
+                }
+                castCounts.get(key).push({
+                  x: event.unit.lastPosition ? event.unit.lastPosition.x : null,
+                  y: event.unit.lastPosition ? event.unit.lastPosition.y : null
+                });
+              }
+            }
             const groups = new Map();
             for (const unit of (player.destroyedSummons || [])) {
               const exported = unit.exportUnit();
               exported.destroyedAt = unit.destroyedAt;
               exported.isSummon = true;
-              const key = exported.itemId + '|' + exported.spawnTime + '|' + exported.destroyedAt;
+              const key = exported.itemId + '|' + exported.spawnTime;
               if (!groups.has(key)) {
                 groups.set(key, []);
               }
               groups.get(key).push(exported);
             }
             const out = [];
-            for (const group of groups.values()) {
+            for (const [key, group] of groups) {
+              const castRecs = castCounts.get(key) || null;
               const bound = [];
               const seen = new Set();
               let unboundFallback = null;
@@ -1133,14 +1149,33 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
                     seen.add(fp);
                     bound.push(exported);
                   }
-                } else if (unboundFallback === null) {
+                } else {
                   unboundFallback = exported;
                 }
               }
-              if (bound.length) {
+              const representative = bound.length ? bound[0] : unboundFallback;
+              if (!representative) {
+                continue;
+              }
+              if (castRecs && (castRecs.length > 0)) {
+                // never drop bound evidence when the eventStream undercounts
+                const n = Math.max(castRecs.length, bound.length);
+                for (let i = 0; i < n; i++) {
+                  const rec = (i < bound.length) ? bound[i] : Object.assign({}, representative);
+                  if (i >= bound.length) {
+                    rec.uuid = representative.uuid + '-cast' + i;
+                  }
+                  if (castRecs[i] && (castRecs[i].x != null)) {
+                    rec.lastPosition = { x: castRecs[i].x, y: castRecs[i].y };
+                  }
+                  out.push(rec);
+                }
+              }
+              else {
                 out.push(...bound);
-              } else if (unboundFallback !== null) {
-                out.push(unboundFallback);
+                if (!bound.length && (unboundFallback !== null)) {
+                  out.push(unboundFallback);
+                }
               }
             }
             return out;

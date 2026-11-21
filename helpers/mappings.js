@@ -1489,11 +1489,17 @@ const heroAbilities = {
     'AUdd': { 'displayName': 'Death and Decay'},
     'AUim': { 'displayName': 'Impale'},
     'AUts': { 'displayName': 'Spiked Carapace'},
-    'AUcb': { 
+    'AUcb': {
       'displayName': 'Carrion Beetles',
       'type': 'summon',
-      'summonCount': 2,
-      'summonItemId': ['ucs1', 'ucs1', 'ucs1'],
+      // [census lane 2026-11-21] level-slotted: retail summons one beetle per
+      // ability level (1/2/3), proven live on flaco27 (every L1 cast raised
+      // exactly one ucs1, expiring 60006-60022ms after spawn; the SLK DataA=2
+      // is NOT this ability's summon count in this patch). The bench engine
+      // sources the same rule (CAbilityCarrionBeetles.populateData). The
+      // flat 2 here over-created eventStream records (flaco 8 for 4 real).
+      'summonCount': [1, 2, 3],
+      'summonItemId': ['ucs1', 'ucs2', 'ucs3'],
       'summonDuration': 60
     },
     'AUls': { 'displayName': 'Locust Swarm'},
