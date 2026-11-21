@@ -1094,13 +1094,57 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
           // summoned two. destroyedSummons entries are real units by
           // construction (destroyUnit only receives live summon objects);
           // export them whether or not a replay id ever bound.
-          (player.destroyedSummons || [])
-            .map(unit => {
+          // [reconcile-census lane 2026-11-21] unregistered summons (never
+          // clicked, so no replay-id binding) were dropped here — the
+          // integral Water Elementals expired by duration, reached
+          // destroyedSummons through destroyUnit, and then vanished from
+          // the census: the reconcile counted truth 0 hwat while retail
+          // summoned. destroyedSummons entries are real units by
+          // construction; export them whether or not a replay id ever
+          // bound. BUT the summon paths can export MORE than one record per
+          // real unit: verbatim duplicates (the birdmane wolves appear twice
+          // identically) and an unbound ghost twin beside a bound record
+          // (flaco beetles). Group by (itemId, spawnTime, destroyedAt) and
+          // within a group keep the bound records (deduped verbatim) or, if
+          // the group has no bound record at all, a single unbound record —
+          // real simultaneous units of one cast always differ in uuid, so
+          // distinct bound records all survive.
+          ...(() => {
+            const groups = new Map();
+            for (const unit of (player.destroyedSummons || [])) {
               const exported = unit.exportUnit();
               exported.destroyedAt = unit.destroyedAt;
               exported.isSummon = true;
-              return exported;
-            })
+              const key = exported.itemId + '|' + exported.spawnTime + '|' + exported.destroyedAt;
+              if (!groups.has(key)) {
+                groups.set(key, []);
+              }
+              groups.get(key).push(exported);
+            }
+            const out = [];
+            for (const group of groups.values()) {
+              const bound = [];
+              const seen = new Set();
+              let unboundFallback = null;
+              for (const exported of group) {
+                const fp = exported.uuid + '|' + exported.itemId1 + '|' + exported.objectId1;
+                if (exported.itemId1 != null || exported.objectId1 != null) {
+                  if (!seen.has(fp)) {
+                    seen.add(fp);
+                    bound.push(exported);
+                  }
+                } else if (unboundFallback === null) {
+                  unboundFallback = exported;
+                }
+              }
+              if (bound.length) {
+                out.push(...bound);
+              } else if (unboundFallback !== null) {
+                out.push(unboundFallback);
+              }
+            }
+            return out;
+          })()
         ),
         buildingAttempts: (_buildingAttempts || []).map(a => ({
           itemId: a.itemId,
