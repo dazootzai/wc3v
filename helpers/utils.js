@@ -1086,8 +1086,15 @@ const buildOutputObject = (replay, wc3vPlayers, world, validation = null) => {
         claims: player._claimRegistry ? player._claimRegistry.toJSON() : [],
         isNeutralPlayer,
     		units: units.map(unit => unit.exportUnit()).concat(
+          // [reconcile-census lane 2026-11-21] unregistered summons (never
+          // clicked, so no replay-id binding) were dropped here — the
+          // integral Water Elementals expired by duration, reached
+          // destroyedSummons through destroyUnit, and then vanished from
+          // the census: the reconcile counted truth 0 hwat while retail
+          // summoned two. destroyedSummons entries are real units by
+          // construction (destroyUnit only receives live summon objects);
+          // export them whether or not a replay id ever bound.
           (player.destroyedSummons || [])
-            .filter(unit => unit.itemId1 !== null || unit.objectId1 !== null)
             .map(unit => {
               const exported = unit.exportUnit();
               exported.destroyedAt = unit.destroyedAt;
