@@ -26,7 +26,17 @@ const lines = fs.readFileSync(simtmp('intent-' + base + '.txt'), 'utf8').split('
 const sel = {}; // player -> array of "id1,id2"
 const presses = [];
 let selCount = 0, subCount = 0, ordCount = 0, chatCount = 0;
-const orderRe = /^t=(\d+)ms p(\d+) act 0x(\w+) #(\d+) flags=0x([0-9a-f]+)(?: pt\(([-\d.]+),([-\d.]+)\))?(?: obj=(-?\d+),(-?\d+))?/;
+// order lines come in both forms: packed ids print as #851971, rawcodes
+// (learns, trains, builds, revives) print as 'rdNA' — the fourcc is the LE
+// string, so the code is its reverse ('rdNA' = ANdr). [spelleff lane
+// 2026-11-22] without this branch every fourcc-form press was silently
+// missing from the attrib files (the learn/train census undercounted).
+const fourccToInt = (s) => Buffer.from(s, 'latin1').readUInt32LE(0);
+const orderRe = /^t=(\d+)ms p(\d+) act 0x(\w+) [#'](\d+|\w{4})['#]? flags=0x([0-9a-f]+)(?: pt\(([-\d.]+),([-\d.]+)\))?(?: obj=(-?\d+),(-?\d+))?/;
+function ordOf(m) {
+  const tok = m[4];
+  return /^\d+$/.test(tok) ? Number(tok) : fourccToInt(tok);
+}
 const selRe = /^t=(\d+)ms p(\d+) SELECT mode=(\d+) \[(.*)\]$/;
 const grpRe = /^GRP\t(\d+)\t(\d+)\t(\d+)\t(.*)$/;
 const gkeyRe = /^GKEY\t(\d+)\t(\d+)\t(\d+)\s*$/;
@@ -87,7 +97,7 @@ for (const line of lines) {
 			return { id1: Number(pair.split(',')[0]), id2: Number(pair.split(',')[1] || 0), ty };
 		});
 		presses.push({
-			ms: +m[1], p, act: m[3], ord: +m[4], flags: m[5],
+			ms: +m[1], p, act: m[3], ord: ordOf(m), flags: m[5],
 			pt: m[6] ? [+m[6], +m[7]] : null,
 			tgt: m[8] ? [Number(m[8]), Number(m[9])] : null,
 			recip
